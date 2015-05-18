@@ -12,10 +12,10 @@ object HelloWorld {
     def main(args: Array[String]) {
       val conf = new SparkConf().setAppName("Prueba").setMaster("local")
       val sc=new SparkContext(conf)
-      val criterion = new InfoThCriterionFactory("mrmr")
-      val nToSelect = 100
-      val nPool = 100 // 0 -> w/o pool
-      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/covtype.scale01")
+      val criterion = new InfoThCriterionFactory("jmi")
+      val nToSelect = 2
+      val nPool = 0 // 0 -> w/o pool
+      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/german.numer")
       
       println("*** FS criterion: " + criterion.getCriterion.toString)
       println("*** Number of features to select: " + nToSelect)
