@@ -17,6 +17,18 @@ object PruebaReliefF {
       
 val data=fdata.sample(false, 0.01, 2)//sc.parallelize(fdata.take(5))
 
+      val numElems=data.count().toDouble
+      val countsClass=data.map(_.label)
+                          .countByValue
+                          .map(
+          {
+            case (value, count) => (value,count/numElems)
+          })
+      val countsAttributes=data.flatMap(_.features.toArray.zipWithIndex)
+                                .map({case (value, index) => ((index, value), 1)})
+                                .reduceByKey(_ + _)
+                                .map({case ((index, value), count) => ((index, value),count/numElems)})
+                       
       val dCD=data.cartesian(data).map(
           {
              case (x,y) if (x==y) => null
@@ -41,13 +53,13 @@ val data=fdata.sample(false, 0.01, 2)//sc.parallelize(fdata.take(5))
                 })
       //Tenemos (instance_original, Lista_de_vecinos(clase, Lista(distancias_vecinos)))
       //Interesa tener (numAtributo, List (factor, Lista(valor_A_I,sumando))) Donde factor es -1/mk si la clase es igual y PC/(1-PCRi) si es distinta
-      var bdCD=sc.broadcast(dCD);
+      var bdCD=sc.broadcast(dCD.collect);
       var attributes=data.first.features.toArray.zipWithIndex
       var weights=attributes.map(
           {
             _._1
           })
-      weights.foreach(println)
+      //weights.foreach(println)
       dCD.foreach(println)
     }
   }
