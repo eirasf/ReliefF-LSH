@@ -1,6 +1,7 @@
 package org.apache.spark.mllib.tests
 
 import org.apache.spark.SparkContext
+import org.apache.spark.SparkContext._
 import org.apache.spark.mllib.feature.InfoThCriterionFactory
 import org.apache.spark.mllib.feature.InfoThSelector
 import org.apache.spark.mllib.regression.LabeledPoint
@@ -15,26 +16,38 @@ object PruebaReliefF {
       val fdata: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/car.libsvm")
       
 val data=fdata.sample(false, 0.01, 2)//sc.parallelize(fdata.take(5))
-      
+
       val dCD=data.cartesian(data).map(
           {
-             case (x,y) => (x, y.label, x.features.toArray.zip(y.features.toArray).map(
+             case (x,y) if (x==y) => null
+             case (x,y) if (x!=y) => (x, (y.label, x.features.toArray.zip(y.features.toArray).map(
                                                                              {x => math.abs(x._1-x._2)}
-                                                                             ).sum)
-          }).groupBy({case (x,yClass,d) => x})
+                                                                             ).sum))
+          }).filter(_!=null)
+            .groupByKey
             .map(
                 {
-                  case (x, nearestNeighborsByClass) => (x, nearestNeighborsByClass.groupBy({case (x, cl, distances) => cl}))
+                  case (x, nearestNeighborsByClass) => (x, nearestNeighborsByClass.groupBy({case (cl, distances) => cl}))
                 })
             .map(
                 {
-                  case(x, nearestNeighborsByClass) => (x.label,nearestNeighborsByClass.map(
-                                                                  {
-                                                                    case (yClass, distances) => (yClass,distances.toSeq.sortBy({case(x,yClass,d) => d}) //Sort by distance
-                                                                                                                        .take(5) //Take the 5 nearest neighbors
-                                                                                                                        .map({case(x,yClass,d) => d})) //Get rid of everything but the distance
-                                                                   }))
+                  case(x, nearestNeighborsByClass) =>
+                              (x,nearestNeighborsByClass.map(
+                                {
+                                  case (yClass, distances) => (yClass,distances.toSeq.sortBy({case(yClass,d) => d}) //Sort by distance
+                                                                                      .take(5) //Take the 5 nearest neighbors
+                                                                                      .map({case(yClass,d) => d})) //Get rid of everything but the distance
+                                 }))
                 })
+      //Tenemos (instance_original, Lista_de_vecinos(clase, Lista(distancias_vecinos)))
+      //Interesa tener (numAtributo, List (factor, Lista(valor_A_I,sumando))) Donde factor es -1/mk si la clase es igual y PC/(1-PCRi) si es distinta
+      var bdCD=sc.broadcast(dCD);
+      var attributes=data.first.features.toArray.zipWithIndex
+      var weights=attributes.map(
+          {
+            _._1
+          })
+      weights.foreach(println)
       dCD.foreach(println)
     }
   }
