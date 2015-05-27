@@ -29,27 +29,44 @@ val data=fdata.sample(false, 0.01, 2)//sc.parallelize(fdata.take(5))
                                 .reduceByKey(_ + _)
                                 .map({case ((index, value), count) => ((index, value),count/numElems)})
                        
-      val dCD=data.cartesian(data).map(
+      val dCD=data.cartesian(data).flatMap(
           {
-             case (x,y) if (x==y) => null
-             case (x,y) if (x!=y) => (x, (y.label, x.features.toArray.zip(y.features.toArray).map(
+             case (x,y) if (x==y) => None
+             case (x,y) if (x!=y) => Some(x, (y, x.features.toArray.zip(y.features.toArray).map(
                                                                              {x => math.abs(x._1-x._2)}
                                                                              ).sum))
-          }).filter(_!=null)
+          })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided.
             .groupByKey
             .map(
                 {
-                  case (x, nearestNeighborsByClass) => (x, nearestNeighborsByClass.groupBy({case (cl, distances) => cl}))
+                  case (x, nearestNeighborsByClass) => (x, nearestNeighborsByClass.groupBy({case (y, distances) => y.label}))
                 })
             .map(
                 {
                   case(x, nearestNeighborsByClass) =>
                               (x,nearestNeighborsByClass.map(
-                                {
-                                  case (yClass, distances) => (yClass,distances.toSeq.sortBy({case(yClass,d) => d}) //Sort by distance
-                                                                                      .take(5) //Take the 5 nearest neighbors
-                                                                                      .map({case(yClass,d) => d})) //Get rid of everything but the distance
-                                 }))
+                                  {
+                                    case (y, distances) => (y,distances.toSeq.sortBy({case(y,d) => d}) //Sort by distance
+                                                                                        .take(5) //Take the 5 nearest neighbors
+                                                                                        .map({case(y,d) => (y,d,5)})) //En vez de poner aquí 5 a pincho, poner el número de vecinos que efectivamente hay (que habrá que hacerlo más adelante)
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                   })
+                              )
+                })
+            .flatMap(
+                {
+                  case (x, nearestNeighborsByClass) =>
+                    nearestNeighborsByClass.flatMap({y=>List(y._2)}).flatten.map({y => (x,y)})
                 })
       //Tenemos (instance_original, Lista_de_vecinos(clase, Lista(distancias_vecinos)))
       //Interesa tener (numAtributo, List (factor, Lista(valor_A_I,sumando))) Donde factor es -1/mk si la clase es igual y PC/(1-PCRi) si es distinta
