@@ -13,7 +13,7 @@ object PruebaReliefF {
     def main(args: Array[String]) {
       val conf = new SparkConf().setAppName("PruebaReliefF").setMaster("local")
       val sc=new SparkContext(conf)
-      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/car.libsvm")
+      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/car-reduced.libsvm")
       val numNeighbors=10;
 //val data=fdata.sample(false, 0.01, 2)//sc.parallelize(fdata.take(5))
 
@@ -51,7 +51,7 @@ object PruebaReliefF {
                      case (x,y) if (x==y) => None
                      case (x,y) if (x!=y) => Some(x, (y, x.features.toArray.zip(y.features.toArray).map(
                                                                                      //{x => math.abs(x._1-x._2)} //Numeric
-                                                                                     {x => if (x!=y) 1.0 else 0.0} //Nominal
+                                                                                     {case (a,b) => if (a!=b) 1.0 else 0.0} //Nominal
                                                                                      ).sum))
                   })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
@@ -77,29 +77,31 @@ object PruebaReliefF {
                 })
             .map(//Compute multipliers for each addend depending on their class
                 {
-                  case(x,(y,d,k)) if (x.label==y.label) => (x.features, y.features, -1.0/k, k)
-                  case(x,(y,d,k)) if (x.label!=y.label) => (x.features, y.features, countsClass.get(x.label).get/((1.0-countsClass.get(y.label).get)*k), k)
+                  case(x,(y,d,k)) if (x.label==y.label) => (x.features, y.features, -1.0/k)
+                  case(x,(y,d,k)) if (x.label!=y.label) => (x.features, y.features, countsClass.get(x.label).get/((1.0-countsClass.get(y.label).get)*k))
                 }
                 )
-.foreach(println)
-/*            .flatMap(//Separate everything into addends for each attribute, and rearrange so that the attribute index is the key 
+//.foreach(println)
+            .flatMap(//Separate everything into addends for each attribute, and rearrange so that the attribute index is the key 
                 {
                   case(xFeat, yFeat, s) => xFeat.toArray.zip(yFeat.toArray).zipWithIndex.map(
                                                                              //{case ((x,y),i) => (math.abs(x-y), i)}).map({z => (z._2,z._1*s)}) //Numeric
                                                                              {case ((x,y),i) => (if (x!=y) 1 else 0, i)}).map({z => (z._2,z._1*s)}) //Nominal
                 }
                 )
+//.foreach(println)
             .reduceByKey({_ + _})//Sum up for each attribute
             .join(rangeAttributes)//In order to divide by the range of each attribute
-            .map(//Add 1 to the attribNum so that is in the [1,N] range and divide each result by m and k.
+.foreach(println)
+/*            .map(//Add 1 to the attribNum so that is in the [1,N] range and divide each result by m and k.
                 {
                   case(attribNum, (sum, range)) => (attribNum+1, sum/(range*numElems))
                 })
       dCD.sortBy(_._2, false).foreach(
           {
             case (index, weight) => printf("Attribute %d: %f\n",index,weight)
-          })
-*/      //Tenemos (instance_original, Lista_de_vecinos(clase, Lista(distancias_vecinos)))
+          })*/
+      //Tenemos (instance_original, Lista_de_vecinos(clase, Lista(distancias_vecinos)))
       //Interesa tener (numAtributo, List (factor, Lista(valor_A_I,sumando))) Donde factor es -1/mk si la clase es igual y PC/(1-PCRi) si es distinta
     }
   }
