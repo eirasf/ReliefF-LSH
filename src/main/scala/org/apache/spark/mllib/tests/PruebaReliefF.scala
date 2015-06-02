@@ -12,8 +12,9 @@ import org.apache.spark.SparkConf
 object PruebaReliefF {
     def main(args: Array[String]) {
       val conf = new SparkConf().setAppName("PruebaReliefF").setMaster("local")
+      conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       val sc=new SparkContext(conf)
-      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/car-reduced.libsvm")
+      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/connect4small.libsvm")
       val numNeighbors=10;
 //val data=fdata.sample(false, 0.01, 2)//sc.parallelize(fdata.take(5))
 
@@ -78,7 +79,7 @@ object PruebaReliefF {
             .map(//Compute multipliers for each addend depending on their class
                 {
                   case(x,(y,d,k)) if (x.label==y.label) => (x.features, y.features, -1.0/k)
-                  case(x,(y,d,k)) if (x.label!=y.label) => (x.features, y.features, countsClass.get(x.label).get/((1.0-countsClass.get(y.label).get)*k))
+                  case(x,(y,d,k)) if (x.label!=y.label) => (x.features, y.features, countsClass.get(y.label).get/((1.0-countsClass.get(x.label).get)*k))
                 }
                 )
 //.foreach(println)
@@ -92,15 +93,15 @@ object PruebaReliefF {
 //.foreach(println)
             .reduceByKey({_ + _})//Sum up for each attribute
             .join(rangeAttributes)//In order to divide by the range of each attribute
-.foreach(println)
-/*            .map(//Add 1 to the attribNum so that is in the [1,N] range and divide each result by m and k.
+//.foreach(println)
+            .map(//Add 1 to the attribNum so that is in the [1,N] range and divide each result by m and k.
                 {
                   case(attribNum, (sum, range)) => (attribNum+1, sum/(range*numElems))
                 })
       dCD.sortBy(_._2, false).foreach(
           {
             case (index, weight) => printf("Attribute %d: %f\n",index,weight)
-          })*/
+          })
       //Tenemos (instance_original, Lista_de_vecinos(clase, Lista(distancias_vecinos)))
       //Interesa tener (numAtributo, List (factor, Lista(valor_A_I,sumando))) Donde factor es -1/mk si la clase es igual y PC/(1-PCRi) si es distinta
     }
