@@ -14,12 +14,15 @@ object PruebaReliefF {
       val conf = new SparkConf().setAppName("PruebaReliefF").setMaster("local")
       conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       val sc=new SparkContext(conf)
-      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/connect4small.libsvm")
+      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/car.libsvm")
       val numNeighbors=10;
 //val data=fdata.sample(false, 0.01, 2)//sc.parallelize(fdata.take(5))
-
+      val numberedData=data.zipWithIndex().map({case x=>(x._2.toInt,x._1)})
       val numElems=data.count().toDouble
       printf("NumElems: %f\n\n",numElems)
+val bnData=sc.broadcast(numberedData.collect().toMap)
+var indices=sc.parallelize(0 to numElems.toInt-1)
+var cart=indices.cartesian(indices)
       val countsClass=data.map(_.label)
                           .countByValue
                           .map(
@@ -46,11 +49,20 @@ object PruebaReliefF {
                                   case (index, (max, min)) => (index, 1) //Nominal
                                 })
       
-      val dCD=data.cartesian(data) //Will compare each instance with every other
+      /*val dCD=data.cartesian(data) //Will compare each instance with every other
                   .flatMap(//Remove comparisons between an instance and itself and compute distances
                   {
                      case (x,y) if (x==y) => None
                      case (x,y) if (x!=y) => Some(x, (y, x.features.toArray.zip(y.features.toArray).map(
+                                                                                     //{x => math.abs(x._1-x._2)} //Numeric
+                                                                                     {case (a,b) => if (a!=b) 1.0 else 0.0} //Nominal
+                                                                                     ).sum))
+                  })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided*/
+val dCD=cart //Will compare each instance with every other
+                  .flatMap(//Remove comparisons between an instance and itself and compute distances
+                  {
+                     case (x,y) if (x==y) => None
+                     case (x,y) if (x!=y) => Some(bnData.value.get(x).get, (bnData.value.get(y).get, bnData.value.get(x).get.features.toArray.zip(bnData.value.get(y).get.features.toArray).map(
                                                                                      //{x => math.abs(x._1-x._2)} //Numeric
                                                                                      {case (a,b) => if (a!=b) 1.0 else 0.0} //Nominal
                                                                                      ).sum))
