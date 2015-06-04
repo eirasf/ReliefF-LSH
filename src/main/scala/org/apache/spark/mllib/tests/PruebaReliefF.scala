@@ -14,7 +14,7 @@ object PruebaReliefF {
       val conf = new SparkConf().setAppName("PruebaReliefF").setMaster("local")
       conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       val sc=new SparkContext(conf)
-      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/car.libsvm")
+      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/LargeDatasets/libsvm/isoletTrain.libsvm")
       val numNeighbors=10;
 //val data=fdata.sample(false, 0.01, 2)//sc.parallelize(fdata.take(5))
       val numberedData=data.zipWithIndex().map({case x=>(x._2.toInt,x._1)})
@@ -45,8 +45,8 @@ var cart=indices.cartesian(indices)
                                 })
                             .map(//Calculate range for each attribute
                                 {
-                                  //case (index, (max, min)) => (index, max-min)//Numeric
-                                  case (index, (max, min)) => (index, 1) //Nominal
+                                  case (index, (max, min)) => (index, max-min)//Numeric
+                                  //case (index, (max, min)) => (index, 1) //Nominal
                                 })
       
       /*val dCD=data.cartesian(data) //Will compare each instance with every other
@@ -62,15 +62,15 @@ val dCD=cart //Will compare each instance with every other
                   .flatMap(//Remove comparisons between an instance and itself and compute distances
                   {
                      case (x,y) if (x==y) => None
-                     case (x,y) if (x!=y) => Some(bnData.value.get(x).get, (bnData.value.get(y).get, bnData.value.get(x).get.features.toArray.zip(bnData.value.get(y).get.features.toArray).map(
-                                                                                     //{x => math.abs(x._1-x._2)} //Numeric
-                                                                                     {case (a,b) => if (a!=b) 1.0 else 0.0} //Nominal
+                     case (x,y) if (x!=y) => Some(x, (y, bnData.value.get(x).get.features.toArray.zip(bnData.value.get(y).get.features.toArray).map(
+                                                                                     {x => math.abs(x._1-x._2)} //Numeric
+                                                                                     //{case (a,b) => if (a!=b) 1.0 else 0.0} //Nominal
                                                                                      ).sum))
                   })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
             .map(//Group by class for each instance so that we can take K neighbors for each class for each instance
                 {
-                  case (x, nearestNeighborsByClass) => (x, nearestNeighborsByClass.groupBy({case (y, distances) => y.label}))
+                  case (x, nearestNeighborsByClass) => (x, nearestNeighborsByClass.groupBy({case (y, distances) => bnData.value.get(y).get.label}))
                 })
             .map(//Sort by distance and select K neighbors for each group
                 {
@@ -90,16 +90,16 @@ val dCD=cart //Will compare each instance with every other
                 })
             .map(//Compute multipliers for each addend depending on their class
                 {
-                  case(x,(y,d,k)) if (x.label==y.label) => (x.features, y.features, -1.0/k)
-                  case(x,(y,d,k)) if (x.label!=y.label) => (x.features, y.features, countsClass.get(y.label).get/((1.0-countsClass.get(x.label).get)*k))
+                  case(x,(y,d,k)) if (bnData.value.get(x).get.label==bnData.value.get(y).get.label) => (x, y, -1.0/k)
+                  case(x,(y,d,k)) if (bnData.value.get(x).get.label!=bnData.value.get(y).get.label) => (x, y, countsClass.get(bnData.value.get(y).get.label).get/((1.0-countsClass.get(bnData.value.get(x).get.label).get)*k))
                 }
                 )
 //.foreach(println)
             .flatMap(//Separate everything into addends for each attribute, and rearrange so that the attribute index is the key 
                 {
-                  case(xFeat, yFeat, s) => xFeat.toArray.zip(yFeat.toArray).zipWithIndex.map(
-                                                                             //{case ((x,y),i) => (math.abs(x-y), i)}).map({z => (z._2,z._1*s)}) //Numeric
-                                                                             {case ((x,y),i) => (if (x!=y) 1 else 0, i)}).map({z => (z._2,z._1*s)}) //Nominal
+                  case(x, y, s) => bnData.value.get(x).get.features.toArray.zip(bnData.value.get(y).get.features.toArray).zipWithIndex.map(
+                                                                             {case ((x,y),i) => (math.abs(x-y), i)}).map({z => (z._2,z._1*s)}) //Numeric
+                                                                             //{case ((x,y),i) => (if (x!=y) 1 else 0, i)}).map({z => (z._2,z._1*s)}) //Nominal
                 }
                 )
 //.foreach(println)
