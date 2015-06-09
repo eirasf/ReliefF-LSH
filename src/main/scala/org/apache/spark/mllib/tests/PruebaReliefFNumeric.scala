@@ -7,7 +7,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.mllib.util.MLUtils
 import org.apache.spark.SparkConf
 
-object PruebaReliefF {
+object PruebaReliefFNumeric {
     def main(args: Array[String]) {
       val conf = new SparkConf().setAppName("PruebaReliefF").setMaster("local")
       conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
@@ -68,54 +68,75 @@ val dCD=cart //Will compare each instance with every other
                                                                                      ).sum))
                   })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
-            .map(//Group by class for each instance so that we can take K neighbors for each class for each instance
+            /*.map(//Group by class for each instance so that we can take K neighbors for each class for each instance
                 {
                   case (x, nearestNeighborsByClass) => (x, nearestNeighborsByClass.groupBy({case (y, distances) => bnData.value.get(y).get.label}))
-                })
+                })*/
             .map(//Sort by distance and select K neighbors for each group
                 {
-                  case(x, nearestNeighborsByClass) =>
-                              (x,nearestNeighborsByClass.map(
-                                  {
-                                    case (y, distances) => (y,distances.toSeq.sortBy({case(y,d) => d}) //Sort by distance
-                                                                                        .take(numNeighbors)) //Take the K nearest neighbors
-                                   })
-                                   .map({case(y,distances) => (y,distances.map({case(y,d) => (y,distances.length)}))}) //Add the number of neighbors so that we can divide later
-                              )
+                  case(x, distances) =>
+                              (x,distances.toSeq.sortBy({case(y,d) => d}) //Sort by distance
+                                          .take(numNeighbors)) //Take the K nearest neighbors
+                })
+            .map(
+                {
+                  case(x,distances) =>
+                              (x,distances.map({case(y,d) => (y,distances.length)})) //Add the number of neighbors so that we can divide later
                 })
             .flatMap(//Ungroup everything in order to closer to addends
                 {
-                  case (x, nearestNeighborsByClass) =>
-                    nearestNeighborsByClass.flatMap({y=>List(y._2)}).flatten.map({y => (x,y)})
+                  case (x, distances) =>
+                      distances.flatMap({y => List((x,y))})
                 })
-            .map(//Compute multipliers for each addend depending on their class
+//Usar este cómputo para calcular m_ndc y (m_nda,m_ndcda) por separado
+dCD.foreach(println)
+
+val m_ndc=dCD.map(
+                {
+                  case (x, (y,k)) => (math.abs(bnData.value.get(x).get.label-bnData.value.get(y).get.label))
+                }) //Falta escalar por el rango de la clase
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                .reduce(_+_)
+val numNeighborsObtained=dCD.first()._2._2
+println("\nNeighbors obtained ="+numNeighborsObtained+"\n----------------")
+println("\nm_ndc="+m_ndc+"\n----------------") //Falta dividir por numNeighborsObtained
+/*            .map(//Compute multipliers for each addend depending on their class
                 {
                   case(x,(y,k)) if (bnData.value.get(x).get.label==bnData.value.get(y).get.label) => (x, y, -1.0/k)
                   case(x,(y,k)) if (bnData.value.get(x).get.label!=bnData.value.get(y).get.label) => (x, y, countsClass.get(bnData.value.get(y).get.label).get/((1.0-countsClass.get(bnData.value.get(x).get.label).get)*k))
                 }
                 )
 //.foreach(println)
-            .flatMap(//Separate everything into addends for each attribute, and rearrange so that the attribute index is the key 
+*/
+val weights=dCD.flatMap(//Separate everything into addends for each attribute, and rearrange so that the attribute index is the key 
                 {
-                  case(x, y, s) => bnData.value.get(x).get.features.toArray.zip(bnData.value.get(y).get.features.toArray).zipWithIndex.map(
-                                                                             {case ((x,y),i) => (i, math.abs(x-y)*s)})//.map({z => (z._2,z._1*s)})//,"X="+x,"Y="+y,"DIFF="+z._1,"FACTOR="+s)}) //Numeric
+                  case(x, (y, k)) => bnData.value.get(x).get.features.toArray.zip(bnData.value.get(y).get.features.toArray).zipWithIndex.map(
+                                                                             {case ((x,y),i) => (math.abs(x-y), i)}).map({z => (z._2,z._1,z._1)})//Numeric
                                                                              //{case ((fx,fy),i) => (if (fx!=fy) 1 else 0, i)}).map({z => (z._2,z._1*s,"X="+x,"Y="+y,"DIFF="+z._1,"FACTOR="+s)}) //Nominal
-                }
-                )
-//.filter(_._1==4)
+                })
+//.filter(_._1==4)                
 //.foreach(println)
-            .reduceByKey({_ + _})//Sum up for each attribute
+/*            .reduceByKey({_ + _})//Sum up for each attribute
             .join(rangeAttributes)//In order to divide by the range of each attribute
 //.foreach(println)
             .map(//Add 1 to the attribNum so that is in the [1,N] range and divide each result by m and k.
                 {
                   case(attribNum, (sum, range)) => (attribNum+1, sum/(range*numElems))
                 })
-      dCD.sortBy(_._2, false).foreach(
+      weights.sortBy(_._2, false).foreach(
           {
             case (index, weight) => printf("Attribute %d: %f\n",index,weight)
           })
-      //Tenemos (instance_original, Lista_de_vecinos(clase, Lista(distancias_vecinos)))
+*/      //Tenemos (instance_original, Lista_de_vecinos(clase, Lista(distancias_vecinos)))
       //Interesa tener (numAtributo, List (factor, Lista(valor_A_I,sumando))) Donde factor es -1/mk si la clase es igual y PC/(1-PCRi) si es distinta
     }
   }
