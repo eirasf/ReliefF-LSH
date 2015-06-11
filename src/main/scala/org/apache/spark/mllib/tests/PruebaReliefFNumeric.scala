@@ -34,6 +34,16 @@ var cart=indices.cartesian(indices)
                                 .reduceByKey(_ + _)
                                 .map({case ((index, value), count) => ((index, value),count/numElems)})
       countsAttributes.foreach(println)*/
+      val maxMinClass=data.map(
+                            {case x => (x.label, x.label)}
+                            )
+                         .reduce(//Compute max and min
+                            {
+                              case ((max1, min1), (max2, min2)) =>
+                                (if (max1>max2) max1 else max2, if (min1<min2) min1 else min2)
+                            })
+      val rangeClass=maxMinClass._1-maxMinClass._2
+printf("\n\nRange Class:"+rangeClass+"\n")
       val rangeAttributes=data.flatMap(_.features.toArray.zipWithIndex) //Separate in (numAttribute,value) pairs
                             .map({case (value, index) => (index, (value, value))}) //Rearrange to compute max and min by reducing
                             .reduceByKey(//Compute max and min for each attribute index
@@ -63,8 +73,8 @@ val dCD=cart //Will compare each instance with every other
                   {
                      case (x,y) if (x==y) => None
                      case (x,y) if (x!=y) => Some(x, (y, bnData.value.get(x).get.features.toArray.zip(bnData.value.get(y).get.features.toArray).map(
-                                                                                     //{x => math.abs(x._1-x._2)} //Numeric
-                                                                                     {case (a,b) => if (a!=b) 1.0 else 0.0} //Nominal
+                                                                                     {x => math.abs(x._1-x._2)} //Numeric
+                                                                                     //{case (a,b) => if (a!=b) 1.0 else 0.0} //Nominal
                                                                                      ).sum))
                   })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
@@ -89,22 +99,11 @@ val dCD=cart //Will compare each instance with every other
                       distances.flatMap({y => List((x,y))})
                 })
 //Usar este cómputo para calcular m_ndc y (m_nda,m_ndcda) por separado
-dCD.foreach(println)
 
 val m_ndc=dCD.map(
                 {
                   case (x, (y,k)) => (math.abs(bnData.value.get(x).get.label-bnData.value.get(y).get.label))
-                }) //Falta escalar por el rango de la clase
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
+                }) //Will be normalized when computing the weight
                 .reduce(_+_)
 val numNeighborsObtained=dCD.first()._2._2
 println("\nNeighbors obtained ="+numNeighborsObtained+"\n----------------")
@@ -120,23 +119,26 @@ println("\nm_ndc="+m_ndc+"\n----------------") //Falta dividir por numNeighborsO
 val weights=dCD.flatMap(//Separate everything into addends for each attribute, and rearrange so that the attribute index is the key 
                 {
                   case(x, (y, k)) => bnData.value.get(x).get.features.toArray.zip(bnData.value.get(y).get.features.toArray).zipWithIndex.map(
-                                                                             {case ((x,y),i) => (math.abs(x-y), i)}).map({z => (z._2,z._1,z._1)})//Numeric
-                                                                             //{case ((fx,fy),i) => (if (fx!=fy) 1 else 0, i)}).map({z => (z._2,z._1*s,"X="+x,"Y="+y,"DIFF="+z._1,"FACTOR="+s)}) //Nominal
+                                                                             {
+                                                                               case ((a,b),i) => (i,(math.abs(a-b), math.abs(a-b)*(math.abs(bnData.value.get(x).get.label-bnData.value.get(y).get.label))))})//Numeric
+                                                                               //case ((a,b),i) if (i==0) => (x,y,i,math.abs(bnData.value.get(x).get.label-bnData.value.get(y).get.label),(math.abs(a-b), math.abs(a-b)*(math.abs(bnData.value.get(x).get.label-bnData.value.get(y).get.label))))//Numeric
+                                                                               //case ((a,b),i) => (x,y,i,0,(math.abs(a-b), math.abs(a-b)*(math.abs(bnData.value.get(x).get.label-bnData.value.get(y).get.label))))})//Numeric
+                                                                               //{case ((fx,fy),i) => (x,y,i, (if (fx!=fy) 1 else 0, if (fx!=fy) math.abs(bnData.value.get(x).get.label-bnData.value.get(y).get.label) else 0))})//Nominal
                 })
-//.filter(_._1==4)                
+//.filter(_._1==4)
 //.foreach(println)
-/*            .reduceByKey({_ + _})//Sum up for each attribute
+            .reduceByKey({case ((m_nda1, m_ndcda1), (m_nda2, m_ndcda2)) => (m_nda1 + m_nda2, m_ndcda1 + m_ndcda2)})//Sum up for each attribute
             .join(rangeAttributes)//In order to divide by the range of each attribute
 //.foreach(println)
-            .map(//Add 1 to the attribNum so that is in the [1,N] range and divide each result by m and k.
+            .map(//Add 1 to the attribNum so that is in the [1,N] range and compute weights.
                 {
-                  case(attribNum, (sum, range)) => (attribNum+1, sum/(range*numElems))
+                  case(attribNum, ((m_nda, m_ndcda),range)) => (attribNum+1, (m_ndcda/m_ndc - ((rangeClass*m_nda - m_ndcda)/(numNeighborsObtained*rangeClass*numElems-m_ndc)))/range)
                 })
       weights.sortBy(_._2, false).foreach(
           {
             case (index, weight) => printf("Attribute %d: %f\n",index,weight)
           })
-*/      //Tenemos (instance_original, Lista_de_vecinos(clase, Lista(distancias_vecinos)))
+      //Tenemos (instance_original, Lista_de_vecinos(clase, Lista(distancias_vecinos)))
       //Interesa tener (numAtributo, List (factor, Lista(valor_A_I,sumando))) Donde factor es -1/mk si la clase es igual y PC/(1-PCRi) si es distinta
     }
   }
