@@ -14,6 +14,7 @@ object ReliefFFeatureSelector
   
     def selectFeatures(sc: SparkContext, data: RDD[LabeledPoint], numNeighbors: Int, attributeNumeric: Map[Int, Boolean], discreteClass: Boolean): RDD[(Int, Double)] =
     {
+      data.cache()
       //Count total number of instances
       val numElems=data.count().toDouble
       printf("NumElems: %f\n\n",numElems)
@@ -52,7 +53,10 @@ object ReliefFFeatureSelector
       var cart=indices.cartesian(indices)//Will compare each instance with every other
       
       if (discreteClass)
+      {
+        data.unpersist(false)
         return selectDiscrete(cart, bnData, bnTypes, numNeighbors, rangeAttributes, countsClass.toMap, numElems);
+      }
       
       val maxMinClass=data.map(
                             {case x => (x.label, x.label)}
@@ -64,7 +68,7 @@ object ReliefFFeatureSelector
                             })
       val rangeClass=maxMinClass._1-maxMinClass._2
       //printf("\n\nRange Class:"+rangeClass+"\n")
-      
+      data.unpersist(false)
       return selectNumeric(cart, bnData, bnTypes, numNeighbors, rangeAttributes, countsClass.toMap, numElems, rangeClass)
     }
     
@@ -151,7 +155,7 @@ object ReliefFFeatureSelector
                   case (x, distances) =>
                       distances.flatMap({y => List((x,y))})
                 })
-                
+      dCD.cache()          
       val m_ndc=dCD.map(
                 {
                   case (x, (y,k)) => (math.abs(bnData.value.get(x).get.label-bnData.value.get(y).get.label))
@@ -173,11 +177,22 @@ object ReliefFFeatureSelector
                 {
                   case(attribNum, ((m_nda, m_ndcda),range)) => (attribNum+1, (m_ndcda/m_ndc - ((rangeClass*m_nda - m_ndcda)/(numNeighborsObtained*rangeClass*numElems-m_ndc)))/range)
                 })
+                
+      dCD.unpersist(false)
+      
       return weights
     }
     
     def main(args: Array[String])
     {
+      if (args.length <= 0)
+      {
+        println("An input libsvm file must be provided")
+        return
+      }
+      
+      var file=args(0)
+      
       //Set up Spark Context
       val conf = new SparkConf().setAppName("PruebaReliefF").setMaster("local[8]")
       conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
@@ -187,17 +202,36 @@ object ReliefFFeatureSelector
       
       //Load data from file
       //val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/LargeDatasets/libsvm/isoletTrain.libsvm")
-      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/car-mini.libsvm")
+      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, file)
+      //val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/car-mini.libsvm")
       
       //Set maximum number of near neighbors to be taken into account for each instance
-      val numNeighbors=10;
+      val numNeighbors=if (args.length>=2)
+                        args(1).toInt
+                       else
+                        10
 
       //Set the type (numeric/discrete) for each attribute and class
-      val attributeTypes=(0 to data.first().features.size);
-      val discreteClass=true
+      val attributeTypes=if (args.length>=3)
+                          args(2).toCharArray().zipWithIndex.map({case (c,i) => (i, c=='N')}).toSeq
+                         else
+                          (0 to data.first().features.size).map((_,true))
+      if (attributeTypes.length!=data.first().features.size)
+      {
+        println("The number of features does not match the instances in the file")
+        return
+      }
+      val discreteClass=(args.length<4) || (args(3)!="n")
+      
+      println("File: "+file)
+      println("Number of neighbors: "+numNeighbors)
+      print("Attribute types: ")
+      attributeTypes.foreach { x => print(if (x._2) "N" else "D") }
+      println
+      println("Class: "+(if (discreteClass) "Discrete" else "Numeric"))
       
       //Select features
-      val features=selectFeatures(sc, data, numNeighbors, attributeTypes.map((_,true)).toMap, discreteClass)
+      val features=selectFeatures(sc, data, numNeighbors, attributeTypes.toMap, discreteClass)
       
       //Print results
       features.sortBy(_._2, false).collect().foreach({case (index, weight) => printf("Attribute %d: %f\n",index,weight)})
