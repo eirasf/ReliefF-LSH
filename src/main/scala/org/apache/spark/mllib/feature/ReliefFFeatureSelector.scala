@@ -12,7 +12,7 @@ import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
 object ReliefFFeatureSelector
 {
   
-    def selectFeatures(sc: SparkContext, data: RDD[LabeledPoint], numNeighbors: Int, attributeNumeric: Map[Int, Boolean], discreteClass: Boolean): RDD[(Int, Double)] =
+    def selectFeatures(sc: SparkContext, data: RDD[LabeledPoint], numNeighbors: Int, attributeNumeric: Array[Boolean], discreteClass: Boolean): RDD[(Int, Double)] =
     {
       data.cache()
       //Count total number of instances
@@ -46,8 +46,8 @@ object ReliefFFeatureSelector
       //rangeAttributes.foreach(println)
       
       //Data is broadcasted in order to reduce memory usage. Indices are used to access its elements.
-      val numberedData=data.zipWithIndex().map({case x=>(x._2.toInt,x._1)})
-      val bnData=sc.broadcast(numberedData.collect().toMap)
+      val numberedData=data.collect()//data.zipWithIndex().map({case x=>(x._2.toInt,x._1)})
+      val bnData=sc.broadcast(numberedData)//.collect())
       val bnTypes=sc.broadcast(attributeNumeric)
       var indices=sc.parallelize(0 to numElems.toInt-1)
       var cart=indices.cartesian(indices)//Will compare each instance with every other
@@ -72,22 +72,28 @@ object ReliefFFeatureSelector
       return selectNumeric(cart, bnData, bnTypes, numNeighbors, rangeAttributes, countsClass.toMap, numElems, rangeClass)
     }
     
-    def selectDiscrete(indexPairs: RDD[(Int, Int)], bnData: Broadcast[Map[Int, LabeledPoint]], bnTypes: Broadcast[Map[Int, Boolean]], numNeighbors: Int, rangeAttributes:  RDD[(Int, Double)], countsClass: Map[Double, Double], numElems: Double): RDD[(Int, Double)] =
+    def selectDiscrete(indexPairs: RDD[(Int, Int)], bnData: Broadcast[Array[LabeledPoint]], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, rangeAttributes:  RDD[(Int, Double)], countsClass: Map[Double, Double], numElems: Double): RDD[(Int, Double)] =
     {
       val dCD=indexPairs
                   //.repartition(8)//Repartition into a suitable number of partitions
                   .flatMap(//Remove comparisons between an instance and itself and compute distances
                   {
                      case (x,y) if (x==y) => None
-                     case (x,y) if (x!=y) => Some(x, (y, bnData.value.get(x).get.features.toArray.zipWithIndex.zip(bnData.value.get(y).get.features.toArray).map(
-                                                                                     {case ((a,i),b) if (bnTypes.value.get(i).get) => math.abs(a-b) //Numeric
-                                                                                     case ((a,i),b) => if (a!=b) 1.0 else 0.0} //Nominal
+/*                     case (x,y) if (x!=y) => Some(x, (y, bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray).map(
+                                                                                     {case ((a,i),b) if (bnTypes.value(i)) => math.abs(a-b) //Numeric
+                                                                                     case ((a,i),b) => if (a!=b) 1.0 else 0.0}
                                                                                      ).sum))
+*/
+                    case (x,y) if (x!=y) => Some(x, (y, bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
+                                                              .foldLeft(0.0)(
+                                                                 {case (sum,((a,i),b)) if (bnTypes.value(i)) => sum+math.abs(a-b) //Numeric
+                                                                 case (sum,((a,i),b)) => if (a!=b) sum+1.0 else sum}
+                                                                 )))
                   })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
             .map(//Group by class for each instance so that we can take K neighbors for each class for each instance
                 {
-                  case (x, nearestNeighborsByClass) => (x, nearestNeighborsByClass.groupBy({case (y, distances) => bnData.value.get(y).get.label}))
+                  case (x, nearestNeighborsByClass) => (x, nearestNeighborsByClass.groupBy({case (y, distances) => bnData.value(y).label}))
                 })
             .map(//Sort by distance and select K neighbors for each group
                 {
@@ -107,14 +113,14 @@ object ReliefFFeatureSelector
                 })
             .map(//Compute multipliers for each addend depending on their class
                 {
-                  case(x,(y,k)) if (bnData.value.get(x).get.label==bnData.value.get(y).get.label) => (x, y, -1.0/k)
-                  case(x,(y,k)) if (bnData.value.get(x).get.label!=bnData.value.get(y).get.label) => (x, y, countsClass.get(bnData.value.get(y).get.label).get/((1.0-countsClass.get(bnData.value.get(x).get.label).get)*k))
+                  case(x,(y,k)) if (bnData.value(x).label==bnData.value(y).label) => (x, y, -1.0/k)
+                  case(x,(y,k)) if (bnData.value(x).label!=bnData.value(y).label) => (x, y, countsClass.get(bnData.value(y).label).get/((1.0-countsClass.get(bnData.value(x).label).get)*k))
                 }
                 )
             .flatMap(//Separate everything into addends for each attribute, and rearrange so that the attribute index is the key 
                 {
-                  case(x, y, s) => bnData.value.get(x).get.features.toArray.zip(bnData.value.get(y).get.features.toArray).zipWithIndex.map(
-                                                                             {case ((x,y),i) if (bnTypes.value.get(i).get) => (i, math.abs(x-y)*s)//Numeric
+                  case(x, y, s) => bnData.value(x).features.toArray.zip(bnData.value(y).features.toArray).zipWithIndex.map(
+                                                                             {case ((x,y),i) if (bnTypes.value(i)) => (i, math.abs(x-y)*s)//Numeric
                                                                              case ((fx,fy),i) => (i, if (fx!=fy) 1.0 else 0.0)})//Nominal
                 }
                 )
@@ -127,17 +133,24 @@ object ReliefFFeatureSelector
       return dCD;
     }
     
-    def selectNumeric(indexPairs: RDD[(Int, Int)], bnData: Broadcast[Map[Int, LabeledPoint]], bnTypes: Broadcast[Map[Int, Boolean]], numNeighbors: Int, rangeAttributes:  RDD[(Int, Double)], countsClass: Map[Double, Double], numElems: Double, rangeClass: Double): RDD[(Int, Double)] =
+    def selectNumeric(indexPairs: RDD[(Int, Int)], bnData: Broadcast[Array[LabeledPoint]], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, rangeAttributes:  RDD[(Int, Double)], countsClass: Map[Double, Double], numElems: Double, rangeClass: Double): RDD[(Int, Double)] =
     {
       val dCD=indexPairs //Will compare each instance with every other
+                  //.repartition(8)//Repartition into a suitable number of partitions
                   .flatMap(//Remove comparisons between an instance and itself and compute distances
                   {
                      case (x,y) if (x==y) => None
-                     case (x,y) if (x!=y) => Some(x, (y, bnData.value.get(x).get.features.toArray.zipWithIndex.zip(bnData.value.get(y).get.features.toArray).map(
-                                                                                     {case ((a,i),b) if (bnTypes.value.get(i).get) => math.abs(a-b) //Numeric
+/*                     case (x,y) if (x!=y) => Some(x, (y, bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray).map(
+                                                                                     {case ((a,i),b) if (bnTypes.value(i)) => math.abs(a-b) //Numeric
                                                                                      case ((a,i),b) => if (a!=b) 1.0 else 0.0}
                                                                                      ).sum))
-                  })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
+*/
+                    case (x,y) if (x!=y) => Some(x, (y, bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
+                                                              .foldLeft(0.0)(
+                                                                 {case (sum,((a,i),b)) if (bnTypes.value(i)) => sum+math.abs(a-b) //Numeric
+                                                                 case (sum,((a,i),b)) => if (a!=b) sum+1.0 else sum}
+                                                                 )))
+                     })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
             .map(//Sort by distance and select K neighbors for each instance
                 {
@@ -158,7 +171,7 @@ object ReliefFFeatureSelector
       dCD.cache()          
       val m_ndc=dCD.map(
                 {
-                  case (x, (y,k)) => (math.abs(bnData.value.get(x).get.label-bnData.value.get(y).get.label))
+                  case (x, (y,k)) => (math.abs(bnData.value(x).label-bnData.value(y).label))
                 }) //Will be normalized when computing the weight
                 .reduce(_+_)
       
@@ -166,10 +179,10 @@ object ReliefFFeatureSelector
 
       val weights=dCD.flatMap(//Separate everything into addends for each attribute, and rearrange so that the attribute index is the key 
                 {
-                  case(x, (y, k)) => bnData.value.get(x).get.features.toArray.zip(bnData.value.get(y).get.features.toArray).zipWithIndex.map(
+                  case(x, (y, k)) => bnData.value(x).features.toArray.zip(bnData.value(y).features.toArray).zipWithIndex.map(
                                                                              {
-                                                                               case ((a,b),i) if (bnTypes.value.get(i).get) => (i,(math.abs(a-b), math.abs(a-b)*(math.abs(bnData.value.get(x).get.label-bnData.value.get(y).get.label))))//Numeric
-                                                                               case ((fx,fy),i) => (i, (if (fx!=fy) 1.0 else 0.0, if (fx!=fy) math.abs(bnData.value.get(x).get.label-bnData.value.get(y).get.label) else 0.0))})//Nominal
+                                                                               case ((a,b),i) if (bnTypes.value(i)) => (i,(math.abs(a-b), math.abs(a-b)*(math.abs(bnData.value(x).label-bnData.value(y).label))))//Numeric
+                                                                               case ((fx,fy),i) => (i, (if (fx!=fy) 1.0 else 0.0, if (fx!=fy) math.abs(bnData.value(x).label-bnData.value(y).label) else 0.0))})//Nominal
                 })
             .reduceByKey({case ((m_nda1, m_ndcda1), (m_nda2, m_ndcda2)) => (m_nda1 + m_nda2, m_ndcda1 + m_ndcda2)})//Sum up for each attribute
             .join(rangeAttributes)//In order to divide by the range of each attribute
@@ -213,25 +226,26 @@ object ReliefFFeatureSelector
 
       //Set the type (numeric/discrete) for each attribute and class
       val attributeTypes=if (args.length>=3)
-                          args(2).toCharArray().zipWithIndex.map({case (c,i) => (i, c=='N')}).toSeq
+                          args(2).toCharArray().map({case c => c=='N'})
                          else
-                          (0 to data.first().features.size).map((_,true))
+                          (0 to data.first().features.size-1).map({case c => true}).toArray
       if (attributeTypes.length!=data.first().features.size)
       {
         println("The number of features does not match the instances in the file")
         return
       }
+      
       val discreteClass=(args.length<4) || (args(3)!="n")
       
       println("File: "+file)
       println("Number of neighbors: "+numNeighbors)
       print("Attribute types: ")
-      attributeTypes.foreach { x => print(if (x._2) "N" else "D") }
+      attributeTypes.foreach { x => print(if (x) "N" else "D") }
       println
       println("Class: "+(if (discreteClass) "Discrete" else "Numeric"))
       
       //Select features
-      val features=selectFeatures(sc, data, numNeighbors, attributeTypes.toMap, discreteClass)
+      val features=selectFeatures(sc, data, numNeighbors, attributeTypes, discreteClass)
       
       //Print results
       features.sortBy(_._2, false).collect().foreach({case (index, weight) => printf("Attribute %d: %f\n",index,weight)})
