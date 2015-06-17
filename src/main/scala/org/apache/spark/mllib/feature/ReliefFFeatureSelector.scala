@@ -76,19 +76,15 @@ object ReliefFFeatureSelector
     {
       val dCD=indexPairs
                   //.repartition(8)//Repartition into a suitable number of partitions
+                  .filter({case (x,y) => x<y})
                   .flatMap(//Remove comparisons between an instance and itself and compute distances
                   {
-                     case (x,y) if (x==y) => None
-/*                     case (x,y) if (x!=y) => Some(x, (y, bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray).map(
-                                                                                     {case ((a,i),b) if (bnTypes.value(i)) => math.abs(a-b) //Numeric
-                                                                                     case ((a,i),b) => if (a!=b) 1.0 else 0.0}
-                                                                                     ).sum))
-*/
-                    case (x,y) if (x!=y) => Some(x, (y, bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
+                    case (x,y) => val dist=bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
                                                               .foldLeft(0.0)(
                                                                  {case (sum,((a,i),b)) if (bnTypes.value(i)) => sum+math.abs(a-b) //Numeric
                                                                  case (sum,((a,i),b)) => if (a!=b) sum+1.0 else sum}
-                                                                 )))
+                                                                 )
+                                  List((x, (y, dist)),(y, (x, dist)))
                   })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
             .map(//Group by class for each instance so that we can take K neighbors for each class for each instance
@@ -137,20 +133,16 @@ object ReliefFFeatureSelector
     {
       val dCD=indexPairs //Will compare each instance with every other
                   //.repartition(8)//Repartition into a suitable number of partitions
+                  .filter({case (x,y) => x<y})
                   .flatMap(//Remove comparisons between an instance and itself and compute distances
                   {
-                     case (x,y) if (x==y) => None
-/*                     case (x,y) if (x!=y) => Some(x, (y, bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray).map(
-                                                                                     {case ((a,i),b) if (bnTypes.value(i)) => math.abs(a-b) //Numeric
-                                                                                     case ((a,i),b) => if (a!=b) 1.0 else 0.0}
-                                                                                     ).sum))
-*/
-                    case (x,y) if (x!=y) => Some(x, (y, bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
+                    case (x,y) => val dist=bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
                                                               .foldLeft(0.0)(
                                                                  {case (sum,((a,i),b)) if (bnTypes.value(i)) => sum+math.abs(a-b) //Numeric
                                                                  case (sum,((a,i),b)) => if (a!=b) sum+1.0 else sum}
-                                                                 )))
-                     })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
+                                                                 )
+                                  List((x, (y, dist)),(y, (x, dist)))
+                  })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
             .map(//Sort by distance and select K neighbors for each instance
                 {
@@ -235,7 +227,7 @@ object ReliefFFeatureSelector
         return
       }
       
-      val discreteClass=(args.length<4) || (args(3)!="n")
+      val discreteClass=(args.length<4) || ((args(3)!="n") && (args(3)!="N"))
       
       println("File: "+file)
       println("Number of neighbors: "+numNeighbors)
