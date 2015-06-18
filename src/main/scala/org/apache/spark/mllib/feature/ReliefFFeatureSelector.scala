@@ -12,7 +12,7 @@ import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
 object ReliefFFeatureSelector
 {
   
-    def selectFeatures(sc: SparkContext, data: RDD[LabeledPoint], numNeighbors: Int, attributeNumeric: Array[Boolean], discreteClass: Boolean): RDD[(Int, Double)] =
+    def rankFeatures(sc: SparkContext, data: RDD[LabeledPoint], numNeighbors: Int, attributeNumeric: Array[Boolean], discreteClass: Boolean): RDD[(Int, Double)] =
     {
       data.cache()
       //Count total number of instances
@@ -237,7 +237,7 @@ object ReliefFFeatureSelector
       println("Class: "+(if (discreteClass) "Discrete" else "Numeric"))
       
       //Select features
-      val features=selectFeatures(sc, data, numNeighbors, attributeTypes, discreteClass)
+      val features=rankFeatures(sc, data, numNeighbors, attributeTypes, discreteClass)
       
       //Print results
       features.sortBy(_._2, false).collect().foreach({case (index, weight) => printf("Attribute %d: %f\n",index,weight)})
