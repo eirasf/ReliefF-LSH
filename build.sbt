@@ -6,7 +6,7 @@ organization := "com.github.sramirez"
 
 scalaVersion := "2.10.4"
 
-libraryDependencies += "org.apache.spark" %% "spark-mllib" % "1.3.0"
+libraryDependencies += "org.apache.spark" %% "spark-mllib" % "1.4.0"
 
 resolvers ++= Seq(
   "Apache Staging" at "https://repository.apache.org/content/repositories/staging/",
@@ -18,7 +18,7 @@ publishMavenStyle := true
 
 sparkPackageName := "sramirez/infotheoretic-feature-selection"
 
-sparkVersion := "1.3.0"
+sparkVersion := "1.4.0"
 
 sparkComponents += "mllib"
 

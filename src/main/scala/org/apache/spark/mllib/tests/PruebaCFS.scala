@@ -15,19 +15,24 @@ import org.apache.spark.broadcast.Broadcast
 
 object PruebaCFS {
     
-    def evalSubset(data: RDD[LabeledPoint], attribIndices: Array[Int], bDevs: Broadcast[Array[Double]], bCorrelMatrix: Broadcast[Matrix]) : Double =
+    def evalSubset(attribIndices: Array[Int], devs: Array[Double], bCorrelMatrix: Broadcast[Matrix]) : Double =
     {
-      //Separar por atributos y quedarse solo con los indicados.
-      //Reducir computando sumatorios de numerador y denominador
-      return 0.0
+      val classIndex=bCorrelMatrix.value.numCols-1;
+      val fraction=attribIndices.map({x => (devs(x) * bCorrelMatrix.value(x, classIndex),
+                                            attribIndices.map({case a  if (a!=x) => 2.0 * devs(x) * devs(a) * bCorrelMatrix.value(x, a)
+                                                                case a => 0.0})
+                                                          .reduce(_+_)
+                                                          + devs(x) * devs(x))})
+                   .reduce({(a,b) => (a._1+b._1, a._2+b._2)})
+      println(fraction)
+      if (fraction._2==0.0)
+        return 0.0
+      return fraction._1/math.sqrt(fraction._2)
     }
   
     def main(args: Array[String]) {
       val conf = new SparkConf().setAppName("Prueba").setMaster("local")
       val sc=new SparkContext(conf)
-      val criterion = new InfoThCriterionFactory("jmi")
-      val nToSelect = 2
-      val nPool = 0 // 0 -> w/o pool
       val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/car-mini.libsvm")
       
       
@@ -37,8 +42,8 @@ object PruebaCFS {
       
       
       
-      //Añadir clase
-      val dataByFeature=data.flatMap({x => x.features.toArray.zipWithIndex.map({case (x,i) => (i, (x,x*x,1))})})//.map{ x => breeze.stats.stddev.apply(x.features.toBreeze) }
+      val dataByFeature=data.flatMap({x => x.features.toArray.view.zipWithIndex.map({case (x,i) => (i, (x,x*x,1))}) :+ (Int.MaxValue,(x.label, x.label*x.label, 1))})
+      dataByFeature.foreach(println)
       val stddevs=dataByFeature.reduceByKey({case ((s1,ss1,c1),(s2,ss2,c2)) => (s1+s2,ss1+ss2,c1+c2)})
                              .map({case (i,(sum, sumSquares, count)) =>
                                          val mean=sum/count
@@ -50,15 +55,16 @@ object PruebaCFS {
                              .map(_._2)
       println("STDDEVS:")
       stddevs.foreach(println)
-      val correlMatrix: Matrix = Statistics.corr(data.map({ x => Vectors.dense(x.features.toArray) }), "spearman")
-      
-      val bDevs=sc.broadcast(stddevs.collect())
+      val correlMatrix: Matrix = Statistics.corr(data.map({ x => Vectors.dense(x.features.toArray :+ x.label) }), "pearson")//"spearman")
+                                           .map(math.abs(_))
+println(correlMatrix)      
+      val devs=stddevs.collect()
       val bCorrelMatrix=sc.broadcast(correlMatrix)
 
       val attribIndices=new Array[Int](1)
-      attribIndices(0)=1
+      attribIndices(0)=0
       
-      val merit=evalSubset(data, attribIndices, bDevs, bCorrelMatrix)
+      val merit=evalSubset(attribIndices, devs, bCorrelMatrix)
       println("Merit: "+merit)
     }
   }
