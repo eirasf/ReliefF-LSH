@@ -34,7 +34,7 @@ values.foreach(println)
 val maxValue=values.head
 println("\t: "+maxValue._2+" by adding "+maxValue._1)
       
-      if (maxValue._2-previousMerit<0.1)
+      if (maxValue._2<=previousMerit)
         return (previousMerit, attribIndices)
       if (attribIndices.length>=maxFeature-2)
         return (maxValue._2, attribIndices :+ maxValue._1)
@@ -45,7 +45,7 @@ println("\t: "+maxValue._2+" by adding "+maxValue._1)
     {
       val classIndex=bCorrelMatrix.value.numCols-1;
       val fraction=attribIndices.map({x => (devs(x) * bCorrelMatrix.value(x, classIndex),
-                                            attribIndices.map({case a  if (a!=x) => 2.0 * devs(x) * devs(a) * bCorrelMatrix.value(x, a)
+                                            attribIndices.map({case a  if (a<x) => 2.0 * devs(x) * devs(a) * bCorrelMatrix.value(x, a)
                                                                 case a => 0.0})
                                                           .reduce(_+_)
                                                           + devs(x) * devs(x))})
