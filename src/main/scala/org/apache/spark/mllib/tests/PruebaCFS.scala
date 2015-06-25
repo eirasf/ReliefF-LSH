@@ -14,31 +14,86 @@ import org.apache.spark.mllib.linalg.Vector
 import org.apache.spark.broadcast.Broadcast
 
 object PruebaCFS {
-    
-    def greedySearch(maxFeature: Int, devs: Array[Double], bCorrelMatrix: Broadcast[Matrix]): (Double,Array[Int]) =
+    def bestFirstSearch(sc: SparkContext, maxFeature: Int, devs: Array[Double], bCorrelMatrix: Broadcast[Matrix]): (Double,Array[Int]) =
     {
-      val attribIndices=Array[Int]()
-      return greedySearchStep(0.0, attribIndices, maxFeature, devs, bCorrelMatrix) 
+      val numMaxStale=5
+      var candidates=List((Array[Int](),0.0))
+      var stale=0
+      var bestMerit=0.0
+      var worstMerit=0.0
+      var bestSet=Array[Int]()
+      while((candidates.length>0) && (stale<numMaxStale))
+      {
+        val cand=candidates.head._1
+        candidates=candidates.tail
+        val merits=sc.parallelize(1 to maxFeature).flatMap({
+            case x if (cand contains x) => None
+            case x => Some((cand :+ x,evalSubset(cand :+ x, devs, bCorrelMatrix)))
+                      //Cache para no calcularlo siempre.
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+          }).filter(_._2>worstMerit)
+        var added=false;
+        if (merits.count()>0)
+        {
+          val res:Array[(Array[Int],Double)]=merits.collect()
+          candidates=(candidates ++ res.toList).sortBy(_._2*(-1)).take(5)
+          if ((candidates.head._2>bestMerit) ||
+              ((candidates.head._2==bestMerit) && (candidates.head._1.length<bestSet.length)))
+          {
+            bestMerit=candidates.head._2
+            bestSet=candidates.head._1
+            added=true
+            stale=0
+          }
+          worstMerit=candidates.last._2
+        }
+        if (!added)
+          stale=stale+1
+          
+println("\n\nPASO----------------")
+candidates.foreach({case (l,m) => print("L:"+l.mkString(","))
+                                  println(" M:"+m)})
+println("Stale: "+stale)
+      }
+      return (bestMerit, bestSet)
     }
     
-    def greedySearchStep(previousMerit: Double, attribIndices: Array[Int], maxFeature: Int, devs: Array[Double], bCorrelMatrix: Broadcast[Matrix]): (Double,Array[Int]) =
+    def greedySearch(sc: SparkContext, maxFeature: Int, devs: Array[Double], bCorrelMatrix: Broadcast[Matrix]): (Double,Array[Int]) =
+    {
+      val attribIndices=Array[Int]()
+      return greedySearchStep(sc, 0.0, attribIndices, maxFeature, devs, bCorrelMatrix) 
+    }
+    
+    def greedySearchStep(sc: SparkContext, previousMerit: Double, attribIndices: Array[Int], maxFeature: Int, devs: Array[Double], bCorrelMatrix: Broadcast[Matrix]): (Double,Array[Int]) =
     {
       val featuresToTest=0 to maxFeature
       //val maxValue=featuresToTest.flatMap({
-      val values=featuresToTest.flatMap({
+      val maxValue=sc.parallelize(featuresToTest).flatMap({
+//      val values=featuresToTest.flatMap({
                         case x if (attribIndices.contains(x)) => None
                         case x => Some((x,evalSubset(attribIndices :+ x, devs, bCorrelMatrix)))
                       }).sortBy({x=>x._2*(-1)})
-println("\nTesting: ")
+                      //.head()
+                      .first()
+/*println("\nTesting: ")
 values.foreach(println)
 val maxValue=values.head
-println("\t: "+maxValue._2+" by adding "+maxValue._1)
+println("\t: "+maxValue._2+" by adding "+maxValue._1)*/
       
       if (maxValue._2<=previousMerit)
         return (previousMerit, attribIndices)
       if (attribIndices.length>=maxFeature-2)
         return (maxValue._2, attribIndices :+ maxValue._1)
-      return greedySearchStep(maxValue._2, attribIndices :+ maxValue._1, maxFeature, devs, bCorrelMatrix)
+      return greedySearchStep(sc, maxValue._2, attribIndices :+ maxValue._1, maxFeature, devs, bCorrelMatrix)
     }
   
     def evalSubset(attribIndices: Array[Int], devs: Array[Double], bCorrelMatrix: Broadcast[Matrix]) : Double =
@@ -105,7 +160,8 @@ println("\t: "+maxValue._2+" by adding "+maxValue._1)
 //val merit=evalSubset(attribIndices, devs, bCorrelMatrix)
 //println("Merit: "+merit)
 
-      val resul=greedySearch(5, devs, bCorrelMatrix)
+      //val resul=greedySearch(sc, 5, devs, bCorrelMatrix)
+      val resul=bestFirstSearch(sc, 5, devs, bCorrelMatrix)
       
       println("Final selection:")
       println("----------------------------")
