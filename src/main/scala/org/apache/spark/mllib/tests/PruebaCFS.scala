@@ -13,6 +13,9 @@ import org.apache.spark.mllib.linalg
 import org.apache.spark.mllib.linalg.Vector
 import org.apache.spark.broadcast.Broadcast
 
+//import java.io.File
+//import breeze.linalg.{CSCMatrix, csvwrite}
+
 object PruebaCFS {
     def bestFirstSearch(sc: SparkContext, maxFeature: Int, devs: Array[Double], bCorrelMatrix: Broadcast[Matrix]): (Double,Array[Int]) =
     {
@@ -28,18 +31,11 @@ object PruebaCFS {
         candidates=candidates.tail
         val merits=sc.parallelize(1 to maxFeature).flatMap({
             case x if (cand contains x) => None
-            case x => Some((cand :+ x,evalSubset(cand :+ x, devs, bCorrelMatrix)))
-                      //Cache para no calcularlo siempre.
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
+            case x => val newSet=cand :+ x
+                      Some(newSet,evalSubset(newSet, devs, bCorrelMatrix))
+                      //A cache could be used to avoid evaluating the same set more than once,
+                      //but the cost of getting it to the compute nodes will probably be larger
+                      //than the gain obtained
           }).filter(_._2>worstMerit)
         var added=false;
         if (merits.count()>0)
@@ -59,10 +55,11 @@ object PruebaCFS {
         if (!added)
           stale=stale+1
           
-println("\n\nPASO----------------")
-candidates.foreach({case (l,m) => print("L:"+l.mkString(","))
+/*println("\n\nPASO----------------")
+candidates.foreach({case (l,m) => print("L:"+l.sorted.mkString(","))
                                   println(" M:"+m)})
 println("Stale: "+stale)
+println("Best merit: "+bestMerit)*/
       }
       return (bestMerit, bestSet)
     }
@@ -133,16 +130,10 @@ println("\t: "+maxValue._2+" by adding "+maxValue._1)*/
     def main(args: Array[String]) {
       val conf = new SparkConf().setAppName("Prueba").setMaster("local")
       val sc=new SparkContext(conf)
-      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/car-mini.libsvm")
-      
-      
-      
-      
-      
-      
-      
+      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/LargeDatasets/libsvm/isoletTrain.libsvm")
       
       val dataByFeature=data.flatMap({x => x.features.toArray.view.zipWithIndex.map({case (x,i) => (i, (x,x*x,1))}) :+ (Int.MaxValue,(x.label, x.label*x.label, 1))})
+      val numFeatures=data.first().features.size
 //dataByFeature.foreach(println)
       val stddevs=computeStdDevs(dataByFeature)
 //println("STDDEVS:")
@@ -150,6 +141,7 @@ println("\t: "+maxValue._2+" by adding "+maxValue._1)*/
 
       val correlMatrix: Matrix = computeCorrelationMatrix(data)
 //println(correlMatrix)
+//csvwrite(new File("/home/eirasf/Escritorio/myCSCMatrix.txt"), correlMatrix.toBreeze, separator=' ')
 
       val devs=stddevs.collect()
       val bCorrelMatrix=sc.broadcast(correlMatrix)
@@ -160,13 +152,13 @@ println("\t: "+maxValue._2+" by adding "+maxValue._1)*/
 //val merit=evalSubset(attribIndices, devs, bCorrelMatrix)
 //println("Merit: "+merit)
 
-      //val resul=greedySearch(sc, 5, devs, bCorrelMatrix)
-      val resul=bestFirstSearch(sc, 5, devs, bCorrelMatrix)
+      //val resul=greedySearch(sc, numFeatures-1, devs, bCorrelMatrix)
+      val resul=bestFirstSearch(sc, numFeatures-1, devs, bCorrelMatrix)
       
       println("Final selection:")
       println("----------------------------")
       println("Merit: "+resul._1)
       println("Set:")
-      resul._2.foreach(println)
+      resul._2.sorted.foreach(println)
     }
   }
