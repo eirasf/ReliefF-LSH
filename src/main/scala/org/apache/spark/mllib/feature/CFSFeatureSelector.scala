@@ -16,7 +16,7 @@ import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
 
 object CFSFeatureSelector {
   
-    def select(sc: SparkContext, data: RDD[LabeledPoint]): (Double, Array[Int]) =
+    def select(sc: SparkContext, data: RDD[LabeledPoint], searchMethod: String): (Double, Array[Int]) =
     {
       val dataByFeature=data.flatMap({x => x.features.toArray.view.zipWithIndex.map({case (x,i) => (i, (x,x*x,1))}) :+ (Int.MaxValue,(x.label, x.label*x.label, 1))})
       val numFeatures=data.first().features.size
@@ -38,8 +38,10 @@ object CFSFeatureSelector {
 //val merit=evalSubset(attribIndices, devs, bCorrelMatrix)
 //println("Merit: "+merit)
 
-      //val resul=greedySearch(sc, numFeatures-1, devs, bCorrelMatrix)
-      return bestFirstSearch(sc, numFeatures-1, devs, bCorrelMatrix)
+      if (searchMethod.toLowerCase()=="bestfirst")
+        return bestFirstSearch(sc, numFeatures-1, devs, bCorrelMatrix)
+      else
+        return greedySearch(sc, numFeatures-1, devs, bCorrelMatrix)
     }
     
     def bestFirstSearch(sc: SparkContext, maxFeature: Int, devs: Array[Double], bCorrelMatrix: Broadcast[Matrix]): (Double,Array[Int]) =
@@ -160,7 +162,19 @@ println("\t: "+maxValue._2+" by adding "+maxValue._1)*/
         return
       }
       
-      var file=args(0)
+      val file=args(0)
+      
+      val method= if (args.length>1)
+                  {
+                    if (args(1).toLowerCase()=="bestfirst")
+                      "bestfirst"
+                    else
+                      "greedystepwise"
+                  }
+                  else "bestfirst"
+                    
+      if (method.toLowerCase()!="bestfirst")
+        method
       
       //Set up Spark Context
       val conf = new SparkConf().setAppName("PruebaReliefF").setMaster("local[8]")
@@ -173,10 +187,11 @@ println("\t: "+maxValue._2+" by adding "+maxValue._1)*/
       //val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/LargeDatasets/libsvm/isoletTrain.libsvm")
       val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, file)
       
-      val resul=select(sc, data)
+      val resul=select(sc, data, method)
       
       println("Final selection:")
       println("----------------------------")
+      println("Method: "+method)
       println("Merit: "+resul._1)
       println("Set:")
       resul._2.sorted.foreach(println)
