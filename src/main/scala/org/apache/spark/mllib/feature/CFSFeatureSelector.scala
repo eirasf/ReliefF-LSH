@@ -1,22 +1,47 @@
-package org.apache.spark.mllib.tests
+package org.apache.spark.mllib.feature
 
 import org.apache.spark.SparkContext
-import org.apache.spark.mllib.feature.InfoThCriterionFactory
-import org.apache.spark.mllib.feature.InfoThSelector
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD
 import org.apache.spark.mllib.util.MLUtils
 import org.apache.spark.SparkConf
 import org.apache.spark.mllib.stat.Statistics
 import org.apache.spark.mllib.linalg._
-import org.apache.spark.mllib.linalg
-import org.apache.spark.mllib.linalg.Vector
 import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.rdd.RDD.rddToOrderedRDDFunctions
+import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
 
 //import java.io.File
 //import breeze.linalg.{CSCMatrix, csvwrite}
 
-object PruebaCFS {
+object CFSFeatureSelector {
+  
+    def select(sc: SparkContext, data: RDD[LabeledPoint]): (Double, Array[Int]) =
+    {
+      val dataByFeature=data.flatMap({x => x.features.toArray.view.zipWithIndex.map({case (x,i) => (i, (x,x*x,1))}) :+ (Int.MaxValue,(x.label, x.label*x.label, 1))})
+      val numFeatures=data.first().features.size
+//dataByFeature.foreach(println)
+      val stddevs=computeStdDevs(dataByFeature)
+//println("STDDEVS:")
+//stddevs.foreach(println)
+
+      val correlMatrix: Matrix = computeCorrelationMatrix(data)
+//println(correlMatrix)
+//csvwrite(new File("/home/eirasf/Escritorio/myCSCMatrix.txt"), correlMatrix.toBreeze, separator=' ')
+
+      val devs=stddevs.collect()
+      val bCorrelMatrix=sc.broadcast(correlMatrix)
+
+      val attribIndices=new Array[Int](1)
+      attribIndices(0)=0
+      
+//val merit=evalSubset(attribIndices, devs, bCorrelMatrix)
+//println("Merit: "+merit)
+
+      //val resul=greedySearch(sc, numFeatures-1, devs, bCorrelMatrix)
+      return bestFirstSearch(sc, numFeatures-1, devs, bCorrelMatrix)
+    }
+    
     def bestFirstSearch(sc: SparkContext, maxFeature: Int, devs: Array[Double], bCorrelMatrix: Broadcast[Matrix]): (Double,Array[Int]) =
     {
       val numMaxStale=5
@@ -128,32 +153,27 @@ println("\t: "+maxValue._2+" by adding "+maxValue._1)*/
     }
   
     def main(args: Array[String]) {
-      val conf = new SparkConf().setAppName("Prueba").setMaster("local")
+      
+      if (args.length <= 0)
+      {
+        println("An input libsvm file must be provided")
+        return
+      }
+      
+      var file=args(0)
+      
+      //Set up Spark Context
+      val conf = new SparkConf().setAppName("PruebaReliefF").setMaster("local[8]")
+      conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      conf.set("spark.eventLog.enabled", "true")
+      conf.set("spark.eventLog.dir","file:///home/eirasf/Escritorio/Tmp-work/sparklog-local")
       val sc=new SparkContext(conf)
-      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/LargeDatasets/libsvm/isoletTrain.libsvm")
       
-      val dataByFeature=data.flatMap({x => x.features.toArray.view.zipWithIndex.map({case (x,i) => (i, (x,x*x,1))}) :+ (Int.MaxValue,(x.label, x.label*x.label, 1))})
-      val numFeatures=data.first().features.size
-//dataByFeature.foreach(println)
-      val stddevs=computeStdDevs(dataByFeature)
-//println("STDDEVS:")
-//stddevs.foreach(println)
-
-      val correlMatrix: Matrix = computeCorrelationMatrix(data)
-//println(correlMatrix)
-//csvwrite(new File("/home/eirasf/Escritorio/myCSCMatrix.txt"), correlMatrix.toBreeze, separator=' ')
-
-      val devs=stddevs.collect()
-      val bCorrelMatrix=sc.broadcast(correlMatrix)
-
-      val attribIndices=new Array[Int](1)
-      attribIndices(0)=0
+      //Load data from file
+      //val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/LargeDatasets/libsvm/isoletTrain.libsvm")
+      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, file)
       
-//val merit=evalSubset(attribIndices, devs, bCorrelMatrix)
-//println("Merit: "+merit)
-
-      //val resul=greedySearch(sc, numFeatures-1, devs, bCorrelMatrix)
-      val resul=bestFirstSearch(sc, numFeatures-1, devs, bCorrelMatrix)
+      val resul=select(sc, data)
       
       println("Final selection:")
       println("----------------------------")
