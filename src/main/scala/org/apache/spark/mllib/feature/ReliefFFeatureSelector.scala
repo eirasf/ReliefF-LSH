@@ -77,7 +77,6 @@ object ReliefFFeatureSelector
       val dCD=indexPairs
                   //.repartition(8)//Repartition into a suitable number of partitions
                   .filter({case (x,y) => x<y})
-.repartition(2500)
                   .flatMap(//Remove comparisons between an instance and itself and compute distances
                   {
                     /*case (x,y) => val dist=bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
@@ -101,7 +100,6 @@ object ReliefFFeatureSelector
                   })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
 //.coalesce(144, false)
-.repartition(500)
             .map(//Group by class for each instance so that we can take K neighbors for each class for each instance
                 {
                   case (x, nearestNeighborsByClass) => (x, nearestNeighborsByClass.groupBy({case (y, distances) => bnData.value(y).label}))
@@ -143,7 +141,7 @@ object ReliefFFeatureSelector
                                        res(a)=(a,math.abs(feat1(a)-feat2(a))*s)
                                     else
                                       if (feat1(a)!=feat2(a))
-                                       res(a)=(a,s)//(a,1.0)
+                                       res(a)=(a,1.0)
                                       else
                                        res(a)=(a,0.0)
                                   res
@@ -165,22 +163,33 @@ object ReliefFFeatureSelector
                   .filter({case (x,y) => x<y})
                   .flatMap(//Remove comparisons between an instance and itself and compute distances
                   {
-                    /*case (x,y) => val dist=bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
+                    case (x,y) => val dist=bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
                                                               .foldLeft(0.0)(
                                                                  {case (sum,((a,i),b)) if (bnTypes.value(i)) => sum+math.abs(a-b) //Numeric
                                                                  case (sum,((a,i),b)) => if (a!=b) sum+1.0 else sum}
-                                                                 )*/
-                    case (x,y) => val feat1=bnData.value(x).features.toArray
-                                  val feat2=bnData.value(y).features.toArray
-                                  var i = 0;
-                                  var dist=0.0
-                                  // for loop execution with a range
-                                  for( a <- 0 to feat1.length-1)
-                                    if (bnTypes.value(a))
-                                       dist=dist+math.abs(feat1(a)-feat2(a))
-                                    else
-                                      if (feat1(a)!=feat2(a))
-                                       dist=dist+1.0
+                                                                 )
+                                  //HACER ITERATIVO
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
+                                                                 
                                   List((x, (y, dist)),(y, (x, dist)))
                   })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
@@ -211,24 +220,30 @@ object ReliefFFeatureSelector
 
       val weights=dCD.flatMap(//Separate everything into addends for each attribute, and rearrange so that the attribute index is the key 
                 {
-                  /*case(x, (y, k)) => bnData.value(x).features.toArray.zip(bnData.value(y).features.toArray).zipWithIndex.map(
+                  case(x, (y, k)) => bnData.value(x).features.toArray.zip(bnData.value(y).features.toArray).zipWithIndex.map(
                                                                              {
                                                                                case ((a,b),i) if (bnTypes.value(i)) => (i,(math.abs(a-b), math.abs(a-b)*(math.abs(bnData.value(x).label-bnData.value(y).label))))//Numeric
-                                                                               case ((fx,fy),i) => (i, (if (fx!=fy) 1.0 else 0.0, if (fx!=fy) math.abs(bnData.value(x).label-bnData.value(y).label) else 0.0))})//Nominal*/
-                  case(x, (y, k)) => val feat1=bnData.value(x).features.toArray
-                                  val feat2=bnData.value(y).features.toArray
-                                  var i = 0;
-                                  var res:Array[(Int, (Double, Double))] = new Array[(Int, (Double, Double))](feat1.length)
-                                  val diffLabels=math.abs(bnData.value(x).label-bnData.value(y).label)
-                                  for( a <- 0 to feat1.length-1)
-                                    if (bnTypes.value(a))
-                                       res(a)=(a,(math.abs(feat1(a)-feat2(a)), math.abs(feat1(a)-feat2(a))*diffLabels))
-                                    else
-                                      if (feat1(a)!=feat2(a))
-                                       res(a)=(a,(1.0,diffLabels))
-                                      else
-                                       res(a)=(a,(0.0,0.0))
-                                  res
+                                                                               case ((fx,fy),i) => (i, (if (fx!=fy) 1.0 else 0.0, if (fx!=fy) math.abs(bnData.value(x).label-bnData.value(y).label) else 0.0))})//Nominal
+                                     //HACER ITERATIVO
+                                                                               
+                                                                               
+                                                                               
+                                                                               
+                                                                               
+                                                                               
+                                                                               
+                                                                               
+                                                                               
+                                                                               
+                                                                               
+                                                                  
+                                                                               
+                                                                               
+                                                                               
+                                                                               
+                                                                               
+                                                                               
+                                                                               
                 })
             .reduceByKey({case ((m_nda1, m_ndcda1), (m_nda2, m_ndcda2)) => (m_nda1 + m_nda2, m_ndcda1 + m_ndcda2)})//Sum up for each attribute
             .join(rangeAttributes)//In order to divide by the range of each attribute
@@ -253,7 +268,7 @@ object ReliefFFeatureSelector
       var file=args(0)
       
       //Set up Spark Context
-      val conf = new SparkConf().setAppName("PruebaReliefF")//.setMaster("local[8]")
+      val conf = new SparkConf().setAppName("PruebaReliefF").setMaster("local[8]")
       conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 //      conf.set("spark.eventLog.enabled", "true")
 //      conf.set("spark.eventLog.dir","file:///home/eirasf/Escritorio/Tmp-work/sparklog-local")
