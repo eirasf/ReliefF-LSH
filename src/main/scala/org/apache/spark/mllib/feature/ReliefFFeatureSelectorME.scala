@@ -9,7 +9,7 @@ import org.apache.spark.SparkConf
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
 
-object ReliefFFeatureSelector
+object ReliefFFeatureSelectorME
 {
   
     def rankFeatures(sc: SparkContext, data: RDD[LabeledPoint], numNeighbors: Int, attributeNumeric: Array[Boolean], discreteClass: Boolean): RDD[(Int, Double)] =
@@ -46,16 +46,16 @@ object ReliefFFeatureSelector
       //rangeAttributes.foreach(println)
       
       //Data is broadcasted in order to reduce memory usage. Indices are used to access its elements.
-      val numberedData=data.collect()//data.zipWithIndex().map({case x=>(x._2.toInt,x._1)})
-      val bnData=sc.broadcast(numberedData)//.collect())
+      //val numberedData=data.collect()//data.zipWithIndex().map({case x=>(x._2.toInt,x._1)})
+      //val bnData=sc.broadcast(numberedData)//.collect())
       val bnTypes=sc.broadcast(attributeNumeric)
-      var indices=sc.parallelize(0 to numElems.toInt-1)
-      var cart=indices.cartesian(indices)//Will compare each instance with every other
+      var indexed=data.zipWithIndex()
+      var cart=indexed.cartesian(indexed).filter({case (x,y) => x._2<y._2})//Will compare each instance with every other
       
       if (discreteClass)
       {
         data.unpersist(false)
-        return selectDiscrete(cart, bnData, bnTypes, numNeighbors, rangeAttributes, countsClass.toMap, numElems);
+        return selectDiscrete(cart, bnTypes, numNeighbors, rangeAttributes, countsClass.toMap, numElems);
       }
       
       val maxMinClass=data.map(
@@ -69,15 +69,13 @@ object ReliefFFeatureSelector
       val rangeClass=maxMinClass._1-maxMinClass._2
       //printf("\n\nRange Class:"+rangeClass+"\n")
       data.unpersist(false)
-      return selectNumeric(cart, bnData, bnTypes, numNeighbors, rangeAttributes, countsClass.toMap, numElems, rangeClass)
+      return selectNumeric(cart, bnTypes, numNeighbors, rangeAttributes, countsClass.toMap, numElems, rangeClass)
     }
     
-    def selectDiscrete(indexPairs: RDD[(Int, Int)], bnData: Broadcast[Array[LabeledPoint]], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, rangeAttributes:  RDD[(Int, Double)], countsClass: Map[Double, Double], numElems: Double): RDD[(Int, Double)] =
+    def selectDiscrete(data: RDD[((LabeledPoint, Long),(LabeledPoint, Long))], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, rangeAttributes:  RDD[(Int, Double)], countsClass: Map[Double, Double], numElems: Double): RDD[(Int, Double)] =
     {
-      val dCD=indexPairs
+      val dCD=data
                   //.repartition(8)//Repartition into a suitable number of partitions
-                  .filter({case (x,y) => x<y})
-.repartition(2500)
                   .flatMap(//Remove comparisons between an instance and itself and compute distances
                   {
                     /*case (x,y) => val dist=bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
@@ -86,8 +84,8 @@ object ReliefFFeatureSelector
                                                                  case (sum,((a,i),b)) => if (a!=b) sum+1.0 else sum}
                                                                  )
                                   List((x, (y, dist)),(y, (x, dist)))*/
-                    case (x,y) => val feat1=bnData.value(x).features.toArray
-                                  val feat2=bnData.value(y).features.toArray
+                    case (x,y) => val feat1=x._1.features.toArray
+                                  val feat2=y._1.features.toArray
                                   var i = 0;
                                   var dist=0.0
                                   // for loop execution with a range
@@ -97,14 +95,13 @@ object ReliefFFeatureSelector
                                     else
                                       if (feat1(a)!=feat2(a))
                                        dist=dist+1.0
-                                  List((x, (y, dist)),(y, (x, dist)))
+                                  List((x._1, (y._1, dist)),(y._1, (x._1, dist)))
                   })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
 //.coalesce(144, false)
-.repartition(500)
             .map(//Group by class for each instance so that we can take K neighbors for each class for each instance
                 {
-                  case (x, nearestNeighborsByClass) => (x, nearestNeighborsByClass.groupBy({case (y, distances) => bnData.value(y).label}))
+                  case (x, nearestNeighborsByClass) => (x, nearestNeighborsByClass.groupBy({case (y, distances) => y.label}))
                 })
             .map(//Sort by distance and select K neighbors for each group
                 {
@@ -124,8 +121,8 @@ object ReliefFFeatureSelector
                 })
             .map(//Compute multipliers for each addend depending on their class
                 {
-                  case(x,(y,k)) if (bnData.value(x).label==bnData.value(y).label) => (x, y, -1.0/k)
-                  case(x,(y,k)) if (bnData.value(x).label!=bnData.value(y).label) => (x, y, countsClass.get(bnData.value(y).label).get/((1.0-countsClass.get(bnData.value(x).label).get)*k))
+                  case(x,(y,k)) if (x.label==y.label) => (x, y, -1.0/k)
+                  case(x,(y,k)) if (x.label!=y.label) => (x, y, countsClass.get(y.label).get/((1.0-countsClass.get(x.label).get)*k))
                 }
                 )
             .flatMap(//Separate everything into addends for each attribute, and rearrange so that the attribute index is the key 
@@ -134,8 +131,8 @@ object ReliefFFeatureSelector
                                                                              {case ((x,y),i) if (bnTypes.value(i)) => (i, math.abs(x-y)*s)//Numeric
                                                                              case ((fx,fy),i) => (i, if (fx!=fy) 1.0 else 0.0)})//Nominal
                   */
-                  case(x, y, s) => val feat1=bnData.value(x).features.toArray
-                                  val feat2=bnData.value(y).features.toArray
+                  case(x, y, s) => val feat1=x.features.toArray
+                                  val feat2=y.features.toArray
                                   var i = 0;
                                   var res:Array[(Int, Double)] = new Array[(Int, Double)](feat1.length)
                                   for( a <- 0 to feat1.length-1)
@@ -158,11 +155,10 @@ object ReliefFFeatureSelector
       return dCD;
     }
     
-    def selectNumeric(indexPairs: RDD[(Int, Int)], bnData: Broadcast[Array[LabeledPoint]], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, rangeAttributes:  RDD[(Int, Double)], countsClass: Map[Double, Double], numElems: Double, rangeClass: Double): RDD[(Int, Double)] =
+    def selectNumeric(data: RDD[((LabeledPoint, Long),(LabeledPoint, Long))], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, rangeAttributes:  RDD[(Int, Double)], countsClass: Map[Double, Double], numElems: Double, rangeClass: Double): RDD[(Int, Double)] =
     {
-      val dCD=indexPairs //Will compare each instance with every other
+      val dCD=data //Will compare each instance with every other
                   //.repartition(8)//Repartition into a suitable number of partitions
-                  .filter({case (x,y) => x<y})
                   .flatMap(//Remove comparisons between an instance and itself and compute distances
                   {
                     /*case (x,y) => val dist=bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
@@ -170,8 +166,8 @@ object ReliefFFeatureSelector
                                                                  {case (sum,((a,i),b)) if (bnTypes.value(i)) => sum+math.abs(a-b) //Numeric
                                                                  case (sum,((a,i),b)) => if (a!=b) sum+1.0 else sum}
                                                                  )*/
-                    case (x,y) => val feat1=bnData.value(x).features.toArray
-                                  val feat2=bnData.value(y).features.toArray
+                    case (x,y) => val feat1=x._1.features.toArray
+                                  val feat2=y._1.features.toArray
                                   var i = 0;
                                   var dist=0.0
                                   // for loop execution with a range
@@ -181,7 +177,7 @@ object ReliefFFeatureSelector
                                     else
                                       if (feat1(a)!=feat2(a))
                                        dist=dist+1.0
-                                  List((x, (y, dist)),(y, (x, dist)))
+                                  List((x._1, (y._1, dist)),(y._1, (x._1, dist)))
                   })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
             .map(//Sort by distance and select K neighbors for each instance
@@ -203,7 +199,7 @@ object ReliefFFeatureSelector
       dCD.cache()          
       val m_ndc=dCD.map(
                 {
-                  case (x, (y,k)) => (math.abs(bnData.value(x).label-bnData.value(y).label))
+                  case (x, (y,k)) => (math.abs(x.label-y.label))
                 }) //Will be normalized when computing the weight
                 .reduce(_+_)
       
@@ -215,11 +211,11 @@ object ReliefFFeatureSelector
                                                                              {
                                                                                case ((a,b),i) if (bnTypes.value(i)) => (i,(math.abs(a-b), math.abs(a-b)*(math.abs(bnData.value(x).label-bnData.value(y).label))))//Numeric
                                                                                case ((fx,fy),i) => (i, (if (fx!=fy) 1.0 else 0.0, if (fx!=fy) math.abs(bnData.value(x).label-bnData.value(y).label) else 0.0))})//Nominal*/
-                  case(x, (y, k)) => val feat1=bnData.value(x).features.toArray
-                                  val feat2=bnData.value(y).features.toArray
+                  case(x, (y, k)) => val feat1=x.features.toArray
+                                  val feat2=y.features.toArray
                                   var i = 0;
                                   var res:Array[(Int, (Double, Double))] = new Array[(Int, (Double, Double))](feat1.length)
-                                  val diffLabels=math.abs(bnData.value(x).label-bnData.value(y).label)
+                                  val diffLabels=math.abs(x.label-y.label)
                                   for( a <- 0 to feat1.length-1)
                                     if (bnTypes.value(a))
                                        res(a)=(a,(math.abs(feat1(a)-feat2(a)), math.abs(feat1(a)-feat2(a))*diffLabels))
@@ -253,7 +249,8 @@ object ReliefFFeatureSelector
       var file=args(0)
       
       //Set up Spark Context
-      val conf = new SparkConf().setAppName("PruebaReliefF")//.setMaster("local[8]")
+      val conf = new SparkConf().setAppName("PruebaReliefF")
+.setMaster("local[8]")
       conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 //      conf.set("spark.eventLog.enabled", "true")
 //      conf.set("spark.eventLog.dir","file:///home/eirasf/Escritorio/Tmp-work/sparklog-local")
