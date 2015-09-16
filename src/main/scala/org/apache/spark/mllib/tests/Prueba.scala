@@ -10,7 +10,7 @@ import org.apache.spark.SparkConf
 
 object HelloWorld {
     def main(args: Array[String]) {
-      val conf = new SparkConf().setAppName("Prueba")//.setMaster("local")
+      val conf = new SparkConf().setAppName("Prueba").setMaster("local")
       val sc=new SparkContext(conf)
       val criterion = new InfoThCriterionFactory("mim")
       val nToSelect = 2

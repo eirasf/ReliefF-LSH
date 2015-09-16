@@ -75,8 +75,8 @@ object ReliefFFeatureSelector
     def selectDiscrete(indexPairs: RDD[(Int, Int)], bnData: Broadcast[Array[LabeledPoint]], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, rangeAttributes:  RDD[(Int, Double)], countsClass: Map[Double, Double], numElems: Double): RDD[(Int, Double)] =
     {
       val dCD=indexPairs
-                  //.repartition(8)//Repartition into a suitable number of partitions
                   .filter({case (x,y) => x<y})
+//.repartition(2500)//Repartition into a suitable number of partitions
                   .flatMap(//Remove comparisons between an instance and itself and compute distances
                   {
                     /*case (x,y) => val dist=bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
@@ -109,10 +109,46 @@ object ReliefFFeatureSelector
                   case(x, nearestNeighborsByClass) =>
                               (x,nearestNeighborsByClass.map(
                                   {
-                                    case (y, distances) => (y,distances.toSeq.sortBy({case(y,d) => d}) //Sort by distance
+                                    /*case (y, distances) => (y,distances.toSeq.sortBy({case(y,d) => d}) //Sort by distance
                                                                                         .take(numNeighbors)) //Take the K nearest neighbors
+                                    */
+                                    case (y, distances) => val nearest=new Array[(Int,Double)](5)
+                                                            var numNeighbors=0
+                                                            var maxDist=Double.MaxValue
+                                                            var maxDistIndex=0
+                                                            for(a <- distances)
+                                                            {
+                                                              if (numNeighbors<5)
+                                                              {
+                                                                nearest(numNeighbors)=a
+                                                                if (a._2<maxDist)
+                                                                {
+                                                                  maxDist=a._2
+                                                                  maxDistIndex=numNeighbors
+                                                                }
+                                                                numNeighbors=numNeighbors+1
+                                                              }
+                                                              else
+                                                                if (a._2<maxDist)
+                                                                {
+                                                                  nearest(maxDistIndex)=a
+                                                                  maxDist=a._2
+                                                                  for(n <- 0 until nearest.length)
+                                                                  {
+                                                                    if (nearest(n)._2<maxDist)
+                                                                    {
+                                                                      maxDist=nearest(n)._2
+                                                                      maxDistIndex=n
+                                                                    }
+                                                                  } 
+                                                                }
+                                                            }
+                                                            val nearestRet=new Array[(Int,Double)](numNeighbors)
+                                                            for(i <- 0 until nearest.length)
+                                                              nearestRet(i)=(nearest(i)._1,numNeighbors)
+                                                            (y, nearestRet)
                                    })
-                                   .map({case(y,distances) => (y,distances.map({case(y,d) => (y,distances.length)}))}) //Add the number of neighbors so that we can divide later
+                                   //.map({case(y,distances) => (y,distances.map({case(y,d) => (y,distances.length)}))}) //Add the number of neighbors so that we can divide later
                               )
                 })
             .flatMap(//Ungroup everything in order to closer to addends
@@ -195,15 +231,51 @@ object ReliefFFeatureSelector
             .groupByKey//Group by instance
             .map(//Sort by distance and select K neighbors for each instance
                 {
-                  case(x, distances) =>
+                  /*case(x, distances) =>
                               (x,distances.toSeq.sortBy({case(y,d) => d}) //Sort by distance
                                           .take(numNeighbors)) //Take the K nearest neighbors
+                  */
+                  case (y, distances) => val nearest=new Array[(Int,Double)](5)
+                                          var numNeighbors=0
+                                          var maxDist=Double.MaxValue
+                                          var maxDistIndex=0
+                                          for(a <- distances)
+                                          {
+                                            if (numNeighbors<5)
+                                            {
+                                              nearest(numNeighbors)=a
+                                              if (a._2<maxDist)
+                                              {
+                                                maxDist=a._2
+                                                maxDistIndex=numNeighbors
+                                              }
+                                              numNeighbors=numNeighbors+1
+                                            }
+                                            else
+                                              if (a._2<maxDist)
+                                              {
+                                                nearest(maxDistIndex)=a
+                                                maxDist=a._2
+                                                for(n <- 0 until nearest.length)
+                                                {
+                                                  if (nearest(n)._2<maxDist)
+                                                  {
+                                                    maxDist=nearest(n)._2
+                                                    maxDistIndex=n
+                                                  }
+                                                } 
+                                              }
+                                          }
+                                          val nearestRet=new Array[(Int,Double)](numNeighbors)
+                                          for(i <- 0 until nearest.length)
+                                            nearestRet(i)=(nearest(i)._1,numNeighbors)
+                                          (y, nearestRet)
                 })
-            .map(
+            /*.map(
                 {
                   case(x,distances) =>
                               (x,distances.map({case(y,d) => (y,distances.length)})) //Add the number of neighbors so that we can divide later
-                })
+                })*/
             .flatMap(//Ungroup everything in order to closer to addends
                 {
                   case (x, distances) =>
