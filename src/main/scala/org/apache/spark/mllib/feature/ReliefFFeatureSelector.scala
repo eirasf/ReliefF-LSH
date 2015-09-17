@@ -281,30 +281,24 @@ object ReliefFFeatureSelector
 
       val weights=dCD.flatMap(//Separate everything into addends for each attribute, and rearrange so that the attribute index is the key 
                 {
-                  case(x, (y, k)) => bnData.value(x).features.toArray.zip(bnData.value(y).features.toArray).zipWithIndex.map(
+                  /*case(x, (y, k)) => bnData.value(x).features.toArray.zip(bnData.value(y).features.toArray).zipWithIndex.map(
                                                                              {
                                                                                case ((a,b),i) if (bnTypes.value(i)) => (i,(math.abs(a-b), math.abs(a-b)*(math.abs(bnData.value(x).label-bnData.value(y).label))))//Numeric
                                                                                case ((fx,fy),i) => (i, (if (fx!=fy) 1.0 else 0.0, if (fx!=fy) math.abs(bnData.value(x).label-bnData.value(y).label) else 0.0))})//Nominal
-                                     //HACER ITERATIVO
-                                                                               
-                                                                               
-                                                                               
-                                                                               
-                                                                               
-                                                                               
-                                                                               
-                                                                               
-                                                                               
-                                                                               
-                                                                               
-                                                                  
-                                                                               
-                                                                               
-                                                                               
-                                                                               
-                                                                               
-                                                                               
-                                                                               
+                  */
+                  case(x, (y, s)) => val feat1=bnData.value(x).features.toArray
+                                  val feat2=bnData.value(y).features.toArray
+                                  var i = 0;
+                                  var res:Array[(Int, (Double,Double))] = new Array[(Int, (Double,Double))](feat1.length)
+                                  for( a <- 0 to feat1.length-1)
+                                    if (bnTypes.value(a))
+                                       res(a)=(a,(math.abs(feat1(a)-feat2(a)), math.abs(feat1(a)-feat2(a))*math.abs(bnData.value(x).label-bnData.value(y).label)))
+                                    else
+                                      if (feat1(a)!=feat2(a))
+                                       res(a)=(a,(1.0,math.abs(bnData.value(x).label-bnData.value(y).label)))
+                                      else
+                                       res(a)=(a,(0.0,0.0))
+                                  res
                 })
             .reduceByKey({case ((m_nda1, m_ndcda1), (m_nda2, m_ndcda2)) => (m_nda1 + m_nda2, m_ndcda1 + m_ndcda2)})//Sum up for each attribute
             .join(rangeAttributes)//In order to divide by the range of each attribute
