@@ -112,21 +112,21 @@ object ReliefFFeatureSelector
                                     /*case (y, distances) => (y,distances.toSeq.sortBy({case(y,d) => d}) //Sort by distance
                                                                                         .take(numNeighbors)) //Take the K nearest neighbors
                                     */
-                                    case (y, distances) => val nearest=new Array[(Int,Double)](5)
-                                                            var numNeighbors=0
-                                                            var maxDist=Double.MaxValue
+                                    case (y, distances) => val nearest=new Array[(Int,Double)](numNeighbors)
+                                                            var curNeighbors=0
+                                                            var maxDist=Double.MinValue
                                                             var maxDistIndex=0
                                                             for(a <- distances)
                                                             {
-                                                              if (numNeighbors<5)
+                                                              if (curNeighbors<numNeighbors)
                                                               {
-                                                                nearest(numNeighbors)=a
-                                                                if (a._2<maxDist)
+                                                                nearest(curNeighbors)=a
+                                                                if (a._2>maxDist)
                                                                 {
                                                                   maxDist=a._2
-                                                                  maxDistIndex=numNeighbors
+                                                                  maxDistIndex=curNeighbors
                                                                 }
-                                                                numNeighbors=numNeighbors+1
+                                                                curNeighbors=curNeighbors+1
                                                               }
                                                               else
                                                                 if (a._2<maxDist)
@@ -135,7 +135,7 @@ object ReliefFFeatureSelector
                                                                   maxDist=a._2
                                                                   for(n <- 0 until nearest.length)
                                                                   {
-                                                                    if (nearest(n)._2<maxDist)
+                                                                    if (nearest(n)._2>maxDist)
                                                                     {
                                                                       maxDist=nearest(n)._2
                                                                       maxDistIndex=n
@@ -143,15 +143,15 @@ object ReliefFFeatureSelector
                                                                   } 
                                                                 }
                                                             }
-                                                            val nearestRet=new Array[(Int,Double)](numNeighbors)
-                                                            for(i <- 0 until nearest.length)
-                                                              nearestRet(i)=(nearest(i)._1,numNeighbors)
+                                                            val nearestRet=new Array[(Int,Double)](curNeighbors)
+                                                            for(i <- 0 until curNeighbors)
+                                                              nearestRet(i)=(nearest(i)._1,curNeighbors)
                                                             (y, nearestRet)
                                    })
                                    //.map({case(y,distances) => (y,distances.map({case(y,d) => (y,distances.length)}))}) //Add the number of neighbors so that we can divide later
                               )
                 })
-            .flatMap(//Ungroup everything in order to closer to addends
+            .flatMap(//Ungroup everything in order to get closer to having addends
                 {
                   case (x, nearestNeighborsByClass) =>
                     nearestNeighborsByClass.flatMap({y=>List(y._2)}).flatten.map({y => (x,y)})
@@ -199,33 +199,22 @@ object ReliefFFeatureSelector
                   .filter({case (x,y) => x<y})
                   .flatMap(//Remove comparisons between an instance and itself and compute distances
                   {
-                    case (x,y) => val dist=bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
+                    /*case (x,y) => val dist=bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
                                                               .foldLeft(0.0)(
                                                                  {case (sum,((a,i),b)) if (bnTypes.value(i)) => sum+math.abs(a-b) //Numeric
                                                                  case (sum,((a,i),b)) => if (a!=b) sum+1.0 else sum}
-                                                                 )
-                                  //HACER ITERATIVO
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
-                                                                 
+                                                                 )*/
+                    case (x,y) => val feat1=bnData.value(x).features.toArray
+                                  val feat2=bnData.value(y).features.toArray
+                                  var i = 0;
+                                  var dist=0.0
+                                  // for loop execution with a range
+                                  for( a <- 0 to feat1.length-1)
+                                    if (bnTypes.value(a))
+                                       dist=dist+math.abs(feat1(a)-feat2(a))
+                                    else
+                                      if (feat1(a)!=feat2(a))
+                                       dist=dist+1.0
                                   List((x, (y, dist)),(y, (x, dist)))
                   })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
@@ -235,21 +224,21 @@ object ReliefFFeatureSelector
                               (x,distances.toSeq.sortBy({case(y,d) => d}) //Sort by distance
                                           .take(numNeighbors)) //Take the K nearest neighbors
                   */
-                  case (y, distances) => val nearest=new Array[(Int,Double)](5)
-                                          var numNeighbors=0
-                                          var maxDist=Double.MaxValue
+                  case (y, distances) => val nearest=new Array[(Int,Double)](numNeighbors)
+                                          var curNeighbors=0
+                                          var maxDist=Double.MinValue
                                           var maxDistIndex=0
                                           for(a <- distances)
                                           {
-                                            if (numNeighbors<5)
+                                            if (curNeighbors<numNeighbors)
                                             {
-                                              nearest(numNeighbors)=a
-                                              if (a._2<maxDist)
+                                              nearest(curNeighbors)=a
+                                              if (a._2>maxDist)
                                               {
                                                 maxDist=a._2
-                                                maxDistIndex=numNeighbors
+                                                maxDistIndex=curNeighbors
                                               }
-                                              numNeighbors=numNeighbors+1
+                                              curNeighbors=curNeighbors+1
                                             }
                                             else
                                               if (a._2<maxDist)
@@ -258,7 +247,7 @@ object ReliefFFeatureSelector
                                                 maxDist=a._2
                                                 for(n <- 0 until nearest.length)
                                                 {
-                                                  if (nearest(n)._2<maxDist)
+                                                  if (nearest(n)._2>maxDist)
                                                   {
                                                     maxDist=nearest(n)._2
                                                     maxDistIndex=n
@@ -267,8 +256,8 @@ object ReliefFFeatureSelector
                                               }
                                           }
                                           val nearestRet=new Array[(Int,Double)](numNeighbors)
-                                          for(i <- 0 until nearest.length)
-                                            nearestRet(i)=(nearest(i)._1,numNeighbors)
+                                          for(i <- 0 until curNeighbors)
+                                            nearestRet(i)=(nearest(i)._1,curNeighbors)
                                           (y, nearestRet)
                 })
             /*.map(

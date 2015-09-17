@@ -78,9 +78,10 @@ class InfoThSelector private[feature] (val criterionFactory: FT) extends Seriali
     val pool = Array.fill[InfoThCriterion](nFeatures - 1) {
       val crit = criterionFactory.getCriterion.init(Float.NegativeInfinity)
       crit.setValid(false)
-    }    
-    relevances.collect().foreach{ case (x, mi) => 
-      pool(x) = criterionFactory.getCriterion.init(mi.toFloat) 
+    }
+    relevances.collect().foreach{ case (x, mi) =>
+      if (x>=0)
+        pool(x) = criterionFactory.getCriterion.init(mi.toFloat) 
     }
     
     // Print most relevant features
