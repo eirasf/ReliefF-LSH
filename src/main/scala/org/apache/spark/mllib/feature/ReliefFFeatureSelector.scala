@@ -252,7 +252,7 @@ object ReliefFFeatureSelector
                                                     maxDist=nearest(n)._2
                                                     maxDistIndex=n
                                                   }
-                                                } 
+                                                }
                                               }
                                           }
                                           val nearestRet=new Array[(Int,Double)](numNeighbors)
