@@ -11,10 +11,14 @@ import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
 import org.apache.spark.mllib.classification.SVMWithSGD
 import scala.collection.mutable.Stack
 import scala.util.control.Breaks._
+import breeze.linalg.Vector
+import org.apache.spark.mllib.linalg.SparseVector
+import org.apache.spark.mllib.linalg.DenseVector
+
 
 object SVMRFEFeatureSelector
 {
-    def rankFeatures(sc: SparkContext, data: RDD[LabeledPoint]): Array[(Int, Double)] =
+    def rankFeatures(sc: SparkContext, data: RDD[LabeledPoint]): Array[Int] =
     {
       data.cache()
       //Count total number of instances
@@ -74,33 +78,31 @@ object SVMRFEFeatureSelector
         ranking.push(sortedMins(a)._1)
         
       val sortedIndices=mins.sortBy({case (index, weight) => index})
+      
+      val dense=dataStep.first().features.isInstanceOf[DenseVector]
         
       //Remove attributes from dataset
       dataStep=dataStep.map({ case x =>
-                        val newFeatures=new Array[Double](x.features.size-STEP)
-                        var newIndex=0
-                        var indexSorted=0
-                        for (i <- 0 until x.features.size)
-                        {
-                          if (i == sortedIndices(indexSorted)._1)
-                          {
-                            indexSorted=indexSorted+1
-                            if (indexSorted>=sortedIndices.length)
-                              break
-                          }
-                          else
-                          {
-                            newFeatures(newIndex)=x.features.size
-                            newIndex=newIndex+1
-                          }
-                        }
-                        new LabeledPoint(x.label, newFeatures)})
-      //Así quedan los índices mal. ¿Se puede aprovechar sparsity para quitar valores?
+                                val newValues=new Array[Double](x.features.size-STEP)
+                                val newIndices=new Array[Int](x.features.size-STEP)
+                                var curIndex=0
+                                var indexSorted=0
+                                
+                                x.features.foreachActive({case x =>
+                                      if ((indexSorted<STEP) && (x._1 == sortedIndices(indexSorted)._1))
+                                        indexSorted=indexSorted+1
+                                      else
+                                      {
+                                        newValues(curIndex)=x._2
+                                        newIndices(curIndex)=x._1
+                                        curIndex=curIndex+1
+                                      }
+                                      println(x._1+" "+x._2)
+                                  })
+                                new LabeledPoint(x.label, new SparseVector(x.features.size-STEP, newIndices, newValues))
+                          })
       //UNPERSIST!!
-      
-      ranking.foreach(println)
-      
-      return (0 to 10).toArray.map({case x => (x,x*1.0)})
+      return ranking.toArray
     }
     
     def main(args: Array[String])
@@ -130,6 +132,7 @@ object SVMRFEFeatureSelector
       //Select features
       val features=rankFeatures(sc, data)
       //Print results
+      features.foreach(println)
       //features.sortBy(_._2, false).collect().foreach({case (index, weight) => printf("Attribute %d: %f\n",index,weight)})
       
       //Stop the Spark Context
