@@ -18,7 +18,7 @@ import org.apache.spark.mllib.linalg.DenseVector
 
 object SVMRFEFeatureSelector
 {
-    def rankFeatures(sc: SparkContext, data: RDD[LabeledPoint]): Array[Int] =
+    def rankFeatures(sc: SparkContext, data: RDD[LabeledPoint], numberOfAttributes:Int): Array[Int] =
     {
       data.cache()
       //Count total number of instances
@@ -27,80 +27,140 @@ object SVMRFEFeatureSelector
 
       val ranking=new Stack[Int]
       var dataStep=data
+      println("Left: "+dataStep.first().features.size)
       
-      val model = SVMWithSGD.train(data, 100)//100 iterations
+      var origIndices=(0 until data.first().features.size).toArray 
       
-      model.weights.toArray.zipWithIndex.foreach(println)
-      
-      //Take the STEP attributes with a smaller weight, add them to the ranking and remove them from the data set
-      var STEP=3
-      if (STEP>model.weights.size)
-        STEP=model.weights.size
-      val mins=new Array[(Int,Double)](STEP)
-      var maxIndex=0
-      var maxValue=Double.MaxValue
-      var numMins=0
-      for (a <- 0 until model.weights.size)
+      while(ranking.length<numberOfAttributes)
       {
-        var w=model.weights(a)
-        w=w*w
-        if (numMins<STEP)
+        //dataStep.take(14)(13).features.foreachActive({case x => println(x._1+" - "+x._2)})
+        println("Training....")
+        val model = SVMWithSGD.train(dataStep, 100)//100 iterations
+        
+        //model.weights.toArray.zipWithIndex.foreach(println)
+        println("Model: "+model.weights.size)
+        //Take the STEP attributes with a smaller weight, add them to the ranking and remove them from the data set
+        var STEP=3
+        if (STEP>model.weights.size)
+          STEP=model.weights.size
+        if (STEP>numberOfAttributes-ranking.length)
+          STEP=numberOfAttributes-ranking.length
+        val mins=new Array[(Int,Double)](STEP)
+        var maxIndex=0
+        var maxValue=Double.MaxValue
+        var numMins=0
+        //for (a <- 0 until model.weights.size)
+        model.weights.foreachActive(
+                { case a =>
+                  var w=a._2
+                  w=w*w
+                  if (numMins<STEP)
+                  {
+                    mins(numMins)=(a._1,w)
+                    if (w>maxValue)
+                    {
+                      maxIndex=numMins
+                      maxValue=w
+                    }
+                    numMins=numMins+1
+                  }
+                  else
+                  {
+                    if (w<maxValue)
+                    {
+                      mins(maxIndex)=(a._1,w)
+                      maxValue=w
+                      for(n <- 0 until mins.length)
+                      {
+                        if (mins(n)._2>maxValue)
+                        {
+                          maxValue=mins(n)._2
+                          maxIndex=n
+                        }
+                      }
+                    }
+                  }
+                })
+        
+        //Add attributes to ranking
+        val sortedMins=mins.sortBy({case (index, weight) => -weight})
+        for (a <- 0 until sortedMins.length)
+          ranking.push(origIndices(sortedMins(a)._1))
+          
+        val sortedIndices=mins.sortBy({case (index, weight) => index})
+        
+        val dense=dataStep.first().features.isInstanceOf[DenseVector]
+        
+        println("Quitar:")
+        sortedIndices.foreach(println)
+        
+        if (ranking.length<numberOfAttributes)
         {
-          mins(numMins)=(a,w)
-          if (w>maxValue)
-          {
-            maxIndex=numMins
-            maxValue=w
-          }
-          numMins=numMins+1
+          //Remove attributes from dataset
+          dataStep=dataStep.map({ case x =>
+                                    var newSize=x.features.size-STEP
+                                    if (x.features.isInstanceOf[SparseVector])
+                                      newSize=x.features.asInstanceOf[SparseVector].indices.length
+                                    var newValues=new Array[Double](newSize)
+                                    var newIndices=new Array[Int](newSize)
+                                    var curIndex=0
+                                    var indexSorted=0
+                                    var removed=0
+                                    var skipped=0
+                                    x.features.foreachActive({case x =>
+                                          //println("Checking: "+x._1+","+x._2)
+                                          if ((indexSorted<STEP) && (x._1 == sortedIndices(indexSorted)._1))
+                                          {
+                                            indexSorted=indexSorted+1
+                                            removed=removed+1
+                                            skipped=skipped+1
+                                            //println("---------Saltado "+x._1)
+                                          }
+                                          else
+                                          {
+                                            while ((indexSorted<STEP) && (x._1 >= sortedIndices(indexSorted)._1))
+                                            {
+                                              indexSorted=indexSorted+1
+                                              skipped=skipped+1
+                                            }
+                                            newValues(curIndex)=x._2
+                                            newIndices(curIndex)=x._1-skipped
+                                            curIndex=curIndex+1
+                                          }
+                                      })
+                                    //newValues.foreach(println)
+                                    //println("T:"+(x.features.size-STEP)+" I:"+newIndices.length+" V:"+newValues.length+" C:"+curIndex)
+                                    if (removed>0)
+                                    {
+                                      newIndices=newIndices.dropRight(removed)
+                                      newValues=newValues.dropRight(removed)
+                                    }
+                                    new LabeledPoint(x.label, new SparseVector(x.features.size-STEP, newIndices, newValues))
+                              })
+                              
+          dataStep.cache()
         }
-        else
+        
+        val temp = new Array[Int](dataStep.first().features.size) //New indices
+        var indexSorted=0
+        var k=0
+        for (i <- 0 until origIndices.length)
         {
-          if (w<maxValue)
+          if ((indexSorted<STEP) && (i == origIndices(sortedIndices(indexSorted)._1)))
           {
-            mins(maxIndex)=(a,w)
-            maxValue=w
-            for(n <- 0 until mins.length)
-            {
-              if (mins(n)._2>maxValue)
-              {
-                maxValue=mins(n)._2
-                maxIndex=n
-              }
-            }
+            indexSorted=indexSorted+1
+          }
+          else
+          {
+            temp(k)=origIndices(i)
+            k=k+1
           }
         }
+        origIndices=temp
+        
+        println(ranking.length+"/"+numberOfAttributes)
+        println("Left: "+dataStep.first().features.size)
       }
-      
-      //Add attributes to ranking
-      val sortedMins=mins.sortBy({case (index, weight) => -weight})
-      for (a <- 0 until sortedMins.length)
-        ranking.push(sortedMins(a)._1)
-        
-      val sortedIndices=mins.sortBy({case (index, weight) => index})
-      
-      val dense=dataStep.first().features.isInstanceOf[DenseVector]
-        
-      //Remove attributes from dataset
-      dataStep=dataStep.map({ case x =>
-                                val newValues=new Array[Double](x.features.size-STEP)
-                                val newIndices=new Array[Int](x.features.size-STEP)
-                                var curIndex=0
-                                var indexSorted=0
-                                
-                                x.features.foreachActive({case x =>
-                                      if ((indexSorted<STEP) && (x._1 == sortedIndices(indexSorted)._1))
-                                        indexSorted=indexSorted+1
-                                      else
-                                      {
-                                        newValues(curIndex)=x._2
-                                        newIndices(curIndex)=x._1
-                                        curIndex=curIndex+1
-                                      }
-                                      println(x._1+" "+x._2)
-                                  })
-                                new LabeledPoint(x.label, new SparseVector(x.features.size-STEP, newIndices, newValues))
-                          })
       //UNPERSIST!!
       return ranking.toArray
     }
@@ -130,7 +190,7 @@ object SVMRFEFeatureSelector
       println("File: "+file)
       
       //Select features
-      val features=rankFeatures(sc, data)
+      val features=rankFeatures(sc, data, 10)
       //Print results
       features.foreach(println)
       //features.sortBy(_._2, false).collect().foreach({case (index, weight) => printf("Attribute %d: %f\n",index,weight)})
