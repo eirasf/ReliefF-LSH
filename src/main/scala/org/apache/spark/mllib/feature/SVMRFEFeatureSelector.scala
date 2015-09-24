@@ -29,7 +29,7 @@ object SVMRFEFeatureSelector
       var dataStep=data
       println("Left: "+dataStep.first().features.size)
       
-      var origIndices=(0 until data.first().features.size).toArray 
+      var origIndices=(1 to data.first().features.size).toArray 
       
       while(ranking.length<numberOfAttributes)
       {
@@ -40,7 +40,7 @@ object SVMRFEFeatureSelector
         //model.weights.toArray.zipWithIndex.foreach(println)
         println("Model: "+model.weights.size)
         //Take the STEP attributes with a smaller weight, add them to the ranking and remove them from the data set
-        var STEP=3
+        var STEP=numberOfAttributes
         if (STEP>model.weights.size)
           STEP=model.weights.size
         if (STEP>numberOfAttributes-ranking.length)
@@ -50,6 +50,7 @@ object SVMRFEFeatureSelector
         var maxValue=Double.MaxValue
         var numMins=0
         //for (a <- 0 until model.weights.size)
+        model.weights.foreachActive({case x =>println("w["+x._1+"]="+x._2)})
         model.weights.foreachActive(
                 { case a =>
                   var w=a._2
@@ -81,11 +82,11 @@ object SVMRFEFeatureSelector
                     }
                   }
                 })
-        
+        mins.foreach({case x =>println("m["+x._1+"]="+x._2)})
         //Add attributes to ranking
         val sortedMins=mins.sortBy({case (index, weight) => -weight})
         for (a <- 0 until sortedMins.length)
-          ranking.push(origIndices(sortedMins(a)._1))
+          ranking.push(origIndices(sortedMins(a)._1-1))
           
         val sortedIndices=mins.sortBy({case (index, weight) => index})
         
@@ -146,17 +147,24 @@ object SVMRFEFeatureSelector
         var k=0
         for (i <- 0 until origIndices.length)
         {
-          if ((indexSorted<STEP) && (i == origIndices(sortedIndices(indexSorted)._1)))
+          if ((indexSorted<STEP) && ((i+1) == sortedIndices(indexSorted)._1))
           {
             indexSorted=indexSorted+1
           }
           else
           {
+            while ((indexSorted<STEP) && ((i+1) > sortedIndices(indexSorted)._1-1))
+            {
+              indexSorted=indexSorted+1
+            }
             temp(k)=origIndices(i)
             k=k+1
           }
         }
         origIndices=temp
+        
+        println("Índices")
+        origIndices.foreach(println)
         
         println(ranking.length+"/"+numberOfAttributes)
         println("Left: "+dataStep.first().features.size)
@@ -188,9 +196,12 @@ object SVMRFEFeatureSelector
       //val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/car-mini.libsvm")
       
       println("File: "+file)
+      val normalizer1 = new Normalizer()
+      val data1 = data.map(x => new LabeledPoint(x.label, normalizer1.transform(x.features)))
+      
       
       //Select features
-      val features=rankFeatures(sc, data, 10)
+      val features=rankFeatures(sc, data1, 1)//data.first().features.size-1)
       //Print results
       features.foreach(println)
       //features.sortBy(_._2, false).collect().foreach({case (index, weight) => printf("Attribute %d: %f\n",index,weight)})
