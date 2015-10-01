@@ -14,17 +14,34 @@ import scala.util.control.Breaks._
 import breeze.linalg.Vector
 import org.apache.spark.mllib.linalg.SparseVector
 import org.apache.spark.mllib.linalg.DenseVector
+import org.apache.spark.mllib.optimization.L1Updater
 
 
 object SVMRFEFeatureSelector
 {
     def rankFeatures(sc: SparkContext, data: RDD[LabeledPoint], numberOfAttributes:Int): Array[Int] =
     {
+      val ranking=new Stack[Int]
+      
       data.cache()
       //Count total number of instances
       val numElems=data.count().toDouble
       printf("NumElems: %f\n\n",numElems)
-
+      
+      val classes=data.map({ case x => x.label }).distinct().collect()
+      val partialRankings=new Array[Array[Int]](classes.length)
+      for(i <- (0 until classes.length))
+        partialRankings(i)=rankFeaturesSingleClass(sc, data.map({case x if x.label==classes(i) => new LabeledPoint(1.0, x.features)
+                                                                  case x => new LabeledPoint(0.0, x.features)}), numberOfAttributes)
+      
+                                                                  
+      //Componer ranking
+      
+      return ranking.toArray
+    }
+    
+    def rankFeaturesSingleClass(sc: SparkContext, data: RDD[LabeledPoint], numberOfAttributes:Int): Array[Int] =
+    {
       val ranking=new Stack[Int]
       var dataStep=data
       println("Left: "+dataStep.first().features.size)
@@ -35,12 +52,22 @@ object SVMRFEFeatureSelector
       {
         //dataStep.take(14)(13).features.foreachActive({case x => println(x._1+" - "+x._2)})
         println("Training....")
+        
+        dataStep.cache()
+        dataStep.foreach { x => println(x.features) }
+        //Usar L1
+       /* val svmAlg = new SVMWithSGD()
+        svmAlg.optimizer.
+          setNumIterations(100).
+          setRegParam(0.02).
+          setUpdater(new L1Updater)
+        //val modelL1 = svmAlg.run(training)
+          val model = svmAlg.run(dataStep)*/
         val model = SVMWithSGD.train(dataStep, 100)//100 iterations
         
-        //model.weights.toArray.zipWithIndex.foreach(println)
-        println("Model: "+model.weights.size)
         //Take the STEP attributes with a smaller weight, add them to the ranking and remove them from the data set
-        var STEP=numberOfAttributes
+        //var STEP=numberOfAttributes
+        var STEP=1
         if (STEP>model.weights.size)
           STEP=model.weights.size
         if (STEP>numberOfAttributes-ranking.length)
@@ -49,8 +76,9 @@ object SVMRFEFeatureSelector
         var maxIndex=0
         var maxValue=Double.MaxValue
         var numMins=0
-        //for (a <- 0 until model.weights.size)
-        model.weights.foreachActive({case x =>println("w["+x._1+"]="+x._2)})
+        
+        //DEBUG - Print weights
+        //model.weights.foreachActive({case x =>println("w["+x._1+"]="+x._2)})
         model.weights.foreachActive(
                 { case a =>
                   var w=a._2
@@ -86,7 +114,7 @@ object SVMRFEFeatureSelector
         //Add attributes to ranking
         val sortedMins=mins.sortBy({case (index, weight) => -weight})
         for (a <- 0 until sortedMins.length)
-          ranking.push(origIndices(sortedMins(a)._1-1))
+          ranking.push(origIndices(sortedMins(a)._1))
           
         val sortedIndices=mins.sortBy({case (index, weight) => index})
         
@@ -138,8 +166,6 @@ object SVMRFEFeatureSelector
                                     }
                                     new LabeledPoint(x.label, new SparseVector(x.features.size-STEP, newIndices, newValues))
                               })
-                              
-          dataStep.cache()
         }
         
         val temp = new Array[Int](dataStep.first().features.size) //New indices
@@ -147,13 +173,13 @@ object SVMRFEFeatureSelector
         var k=0
         for (i <- 0 until origIndices.length)
         {
-          if ((indexSorted<STEP) && ((i+1) == sortedIndices(indexSorted)._1))
+          if ((indexSorted<STEP) && (i == sortedIndices(indexSorted)._1))
           {
             indexSorted=indexSorted+1
           }
           else
           {
-            while ((indexSorted<STEP) && ((i+1) > sortedIndices(indexSorted)._1-1))
+            while ((indexSorted<STEP) && (i > sortedIndices(indexSorted)._1-1))
             {
               indexSorted=indexSorted+1
             }
@@ -193,15 +219,14 @@ object SVMRFEFeatureSelector
       //Load data from file
       //val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/LargeDatasets/libsvm/isoletTrain.libsvm")
       val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, file)
-      //val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/car-mini.libsvm")
       
       println("File: "+file)
-      val normalizer1 = new Normalizer()
-      val data1 = data.map(x => new LabeledPoint(x.label, normalizer1.transform(x.features)))
+      //val normalizer1 = new Normalizer()
+      //val data1 = data.map(x => new LabeledPoint(x.label, normalizer1.transform(x.features)))
       
       
       //Select features
-      val features=rankFeatures(sc, data1, 1)//data.first().features.size-1)
+      val features=rankFeatures(sc, data, data.first().features.size)
       //Print results
       features.foreach(println)
       //features.sortBy(_._2, false).collect().foreach({case (index, weight) => printf("Attribute %d: %f\n",index,weight)})
