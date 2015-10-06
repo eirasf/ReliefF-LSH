@@ -21,7 +21,7 @@ object SVMRFEFeatureSelector
 {
     def rankFeatures(sc: SparkContext, data: RDD[LabeledPoint], numberOfAttributes:Int): Array[Int] =
     {
-      val ranking=new Stack[Int]
+      val ranking=new Array[Int](numberOfAttributes)
       
       data.cache()
       //Count total number of instances
@@ -29,18 +29,39 @@ object SVMRFEFeatureSelector
       printf("NumElems: %f\n\n",numElems)
       
       val classes=data.map({ case x => x.label }).distinct().collect()
-      val partialRankings=new Array[Array[Int]](classes.length)
+      val partialRankings=new Array[Stack[Int]](classes.length)
       for(i <- (0 until classes.length))
+      {
         partialRankings(i)=rankFeaturesSingleClass(sc, data.map({case x if x.label==classes(i) => new LabeledPoint(1.0, x.features)
                                                                   case x => new LabeledPoint(0.0, x.features)}), numberOfAttributes)
+        print("Class "+i+": ")
+        partialRankings(i).foreach({case x => print(x+",")})
+        println()
+      }
       
                                                                   
       //Componer ranking
+      var i=0
+      var lastClass=0
+      while(i<ranking.length)
+      {
+        while((i<ranking.length) && (lastClass<classes.length))
+        {
+          val r=partialRankings(lastClass).pop()
+          if (!ranking.contains(r))
+          {
+            ranking(i)=r
+            i=i+1
+          }
+          lastClass=lastClass+1
+        }
+        lastClass=lastClass%classes.length
+      }
       
-      return ranking.toArray
+      return ranking
     }
     
-    def rankFeaturesSingleClass(sc: SparkContext, data: RDD[LabeledPoint], numberOfAttributes:Int): Array[Int] =
+    def rankFeaturesSingleClass(sc: SparkContext, data: RDD[LabeledPoint], numberOfAttributes:Int): Stack[Int] =
     {
       val ranking=new Stack[Int]
       var dataStep=data
@@ -54,7 +75,7 @@ object SVMRFEFeatureSelector
         println("Training....")
         
         dataStep.cache()
-        dataStep.foreach { x => println(x.features) }
+        //dataStep.foreach { x => println(x.features) }
         //Usar L1
        /* val svmAlg = new SVMWithSGD()
         svmAlg.optimizer.
@@ -64,6 +85,7 @@ object SVMRFEFeatureSelector
         //val modelL1 = svmAlg.run(training)
           val model = svmAlg.run(dataStep)*/
         val model = SVMWithSGD.train(dataStep, 100)//100 iterations
+        dataStep.unpersist()
         
         //Take the STEP attributes with a smaller weight, add them to the ranking and remove them from the data set
         //var STEP=numberOfAttributes
@@ -110,7 +132,7 @@ object SVMRFEFeatureSelector
                     }
                   }
                 })
-        mins.foreach({case x =>println("m["+x._1+"]="+x._2)})
+        //mins.foreach({case x =>println("m["+x._1+"]="+x._2)})
         //Add attributes to ranking
         val sortedMins=mins.sortBy({case (index, weight) => -weight})
         for (a <- 0 until sortedMins.length)
@@ -120,8 +142,8 @@ object SVMRFEFeatureSelector
         
         val dense=dataStep.first().features.isInstanceOf[DenseVector]
         
-        println("Quitar:")
-        sortedIndices.foreach(println)
+        //println("Quitar:")
+        //sortedIndices.foreach(println)
         
         if (ranking.length<numberOfAttributes)
         {
@@ -189,14 +211,14 @@ object SVMRFEFeatureSelector
         }
         origIndices=temp
         
-        println("Índices")
-        origIndices.foreach(println)
+        //println("Índices")
+        //origIndices.foreach(println)
         
         println(ranking.length+"/"+numberOfAttributes)
-        println("Left: "+dataStep.first().features.size)
+        //println("Left: "+dataStep.first().features.size)
       }
       //UNPERSIST!!
-      return ranking.toArray
+      return ranking
     }
     
     def main(args: Array[String])
@@ -226,7 +248,7 @@ object SVMRFEFeatureSelector
       
       
       //Select features
-      val features=rankFeatures(sc, data, data.first().features.size)
+      val features=rankFeatures(sc, data, 28)//data.first().features.size)
       //Print results
       features.foreach(println)
       //features.sortBy(_._2, false).collect().foreach({case (index, weight) => printf("Attribute %d: %f\n",index,weight)})
