@@ -232,7 +232,7 @@ object SVMRFEFeatureSelector
       var file=args(0)
       
       //Set up Spark Context
-      val conf = new SparkConf().setAppName("PruebaReliefF").setMaster("local[8]")
+      val conf = new SparkConf().setAppName("PruebaSVMRFE")//.setMaster("local[8]")
       conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 //      conf.set("spark.eventLog.enabled", "true")
 //      conf.set("spark.eventLog.dir","file:///home/eirasf/Escritorio/Tmp-work/sparklog-local")

@@ -76,7 +76,7 @@ object ReliefFFeatureSelector
     {
       val dCD=indexPairs
                   .filter({case (x,y) => x<y})
-//.repartition(2500)//Repartition into a suitable number of partitions
+.repartition(256)//Repartition into a suitable number of partitions
                   .flatMap(//Remove comparisons between an instance and itself and compute distances
                   {
                     /*case (x,y) => val dist=bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
@@ -99,7 +99,7 @@ object ReliefFFeatureSelector
                                   List((x, (y, dist)),(y, (x, dist)))
                   })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
-//.coalesce(144, false)
+.coalesce(128, false)
             .map(//Group by class for each instance so that we can take K neighbors for each class for each instance
                 {
                   case (x, nearestNeighborsByClass) => (x, nearestNeighborsByClass.groupBy({case (y, distances) => bnData.value(y).label}))
@@ -323,7 +323,7 @@ object ReliefFFeatureSelector
       var file=args(0)
       
       //Set up Spark Context
-      val conf = new SparkConf().setAppName("PruebaReliefF").setMaster("local[8]")
+      val conf = new SparkConf().setAppName("PruebaReliefF")//.setMaster("local[8]")
       conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 //      conf.set("spark.eventLog.enabled", "true")
 //      conf.set("spark.eventLog.dir","file:///home/eirasf/Escritorio/Tmp-work/sparklog-local")
