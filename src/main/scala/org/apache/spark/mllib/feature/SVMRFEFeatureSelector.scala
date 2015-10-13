@@ -248,7 +248,7 @@ object SVMRFEFeatureSelector
       
       
       //Select features
-      val features=rankFeatures(sc, data, 28)//data.first().features.size)
+      val features=rankFeatures(sc, data, data.first().features.size)
       //Print results
       features.foreach(println)
       //features.sortBy(_._2, false).collect().foreach({case (index, weight) => printf("Attribute %d: %f\n",index,weight)})
