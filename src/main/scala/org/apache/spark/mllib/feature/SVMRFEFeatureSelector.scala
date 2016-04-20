@@ -40,7 +40,7 @@ object SVMRFEFeatureSelector
       }
       
                                                                   
-      //Componer ranking
+      //Compose ranking
       var i=0
       var lastClass=0
       while(i<ranking.length)
@@ -71,24 +71,14 @@ object SVMRFEFeatureSelector
       
       while(ranking.length<numberOfAttributes)
       {
-        //dataStep.take(14)(13).features.foreachActive({case x => println(x._1+" - "+x._2)})
         println("Training....")
         
         dataStep.cache()
-        //dataStep.foreach { x => println(x.features) }
-        //Usar L1
-       /* val svmAlg = new SVMWithSGD()
-        svmAlg.optimizer.
-          setNumIterations(100).
-          setRegParam(0.02).
-          setUpdater(new L1Updater)
-        //val modelL1 = svmAlg.run(training)
-          val model = svmAlg.run(dataStep)*/
+        
         val model = SVMWithSGD.train(dataStep, 100)//100 iterations
         dataStep.unpersist()
         
         //Take the STEP attributes with a smaller weight, add them to the ranking and remove them from the data set
-        //var STEP=numberOfAttributes
         var STEP=1
         if (STEP>model.weights.size)
           STEP=model.weights.size
@@ -99,8 +89,6 @@ object SVMRFEFeatureSelector
         var maxValue=Double.MaxValue
         var numMins=0
         
-        //DEBUG - Print weights
-        //model.weights.foreachActive({case x =>println("w["+x._1+"]="+x._2)})
         model.weights.foreachActive(
                 { case a =>
                   var w=a._2
@@ -132,7 +120,6 @@ object SVMRFEFeatureSelector
                     }
                   }
                 })
-        //mins.foreach({case x =>println("m["+x._1+"]="+x._2)})
         //Add attributes to ranking
         val sortedMins=mins.sortBy({case (index, weight) => -weight})
         for (a <- 0 until sortedMins.length)
@@ -141,9 +128,6 @@ object SVMRFEFeatureSelector
         val sortedIndices=mins.sortBy({case (index, weight) => index})
         
         val dense=dataStep.first().features.isInstanceOf[DenseVector]
-        
-        //println("Quitar:")
-        //sortedIndices.foreach(println)
         
         if (ranking.length<numberOfAttributes)
         {
@@ -159,13 +143,11 @@ object SVMRFEFeatureSelector
                                     var removed=0
                                     var skipped=0
                                     x.features.foreachActive({case x =>
-                                          //println("Checking: "+x._1+","+x._2)
                                           if ((indexSorted<STEP) && (x._1 == sortedIndices(indexSorted)._1))
                                           {
                                             indexSorted=indexSorted+1
                                             removed=removed+1
                                             skipped=skipped+1
-                                            //println("---------Saltado "+x._1)
                                           }
                                           else
                                           {
@@ -179,8 +161,7 @@ object SVMRFEFeatureSelector
                                             curIndex=curIndex+1
                                           }
                                       })
-                                    //newValues.foreach(println)
-                                    //println("T:"+(x.features.size-STEP)+" I:"+newIndices.length+" V:"+newValues.length+" C:"+curIndex)
+                                    
                                     if (removed>0)
                                     {
                                       newIndices=newIndices.dropRight(removed)
@@ -211,13 +192,8 @@ object SVMRFEFeatureSelector
         }
         origIndices=temp
         
-        //println("Índices")
-        //origIndices.foreach(println)
-        
         println(ranking.length+"/"+numberOfAttributes)
-        //println("Left: "+dataStep.first().features.size)
       }
-      //UNPERSIST!!
       return ranking
     }
     
@@ -232,14 +208,13 @@ object SVMRFEFeatureSelector
       var file=args(0)
       
       //Set up Spark Context
-      val conf = new SparkConf().setAppName("PruebaSVMRFE")//.setMaster("local[8]")
+      val conf = new SparkConf().setAppName("PruebaSVMRFE").setMaster("local[8]")
       conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 //      conf.set("spark.eventLog.enabled", "true")
 //      conf.set("spark.eventLog.dir","file:///home/eirasf/Escritorio/Tmp-work/sparklog-local")
       val sc=new SparkContext(conf)
       
       //Load data from file
-      //val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/LargeDatasets/libsvm/isoletTrain.libsvm")
       val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, file)
       
       println("File: "+file)
