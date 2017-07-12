@@ -8,6 +8,8 @@ import org.apache.spark.mllib.util.MLUtils
 import org.apache.spark.SparkConf
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
+import java.io.PrintWriter
+import java.io.File
 
 object ReliefFFeatureSelector
 {
@@ -322,11 +324,14 @@ object ReliefFFeatureSelector
       
       var file=args(0)
       
+      var fileOut=file.substring(0,file.lastIndexOf("."))+"-out.txt"
+      
       //Set up Spark Context
       val conf = new SparkConf().setAppName("PruebaReliefF")//.setMaster("local[8]")
       conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 //      conf.set("spark.eventLog.enabled", "true")
 //      conf.set("spark.eventLog.dir","file:///home/eirasf/Escritorio/Tmp-work/sparklog-local")
+      
       val sc=new SparkContext(conf)
       
       //Load data from file
@@ -353,17 +358,33 @@ object ReliefFFeatureSelector
       
       val discreteClass=(args.length<4) || ((args(3)!="n") && (args(3)!="N"))
       
+      val pw = new PrintWriter(new File(fileOut))
+      
       println("File: "+file)
+      pw.println("File: "+file)
       println("Number of neighbors: "+numNeighbors)
+      pw.println("Number of neighbors: "+numNeighbors)
       print("Attribute types: ")
+      pw.print("Attribute types: ")
       attributeTypes.foreach { x => print(if (x) "N" else "D") }
       println
+      pw.println
       println("Class: "+(if (discreteClass) "Discrete" else "Numeric"))
+      pw.println("Class: "+(if (discreteClass) "Discrete" else "Numeric"))
+      
+      val startTime=System.currentTimeMillis()
       
       //Select features
       val features=rankFeatures(sc, data, numNeighbors, attributeTypes, discreteClass)
       //Print results
-      features.sortBy(_._2, false).collect().foreach({case (index, weight) => printf("Attribute %d: %f\n",index,weight)})
+      features.sortBy(_._2, false).collect().foreach({case (index, weight) =>
+                                                              printf("Attribute %d: %f\n",index,weight)
+                                                              pw.println("Attribute "+"%d".format(index)+": "+"%f".format(weight))})
+      
+      println("Computed in "+(System.currentTimeMillis()-startTime)+" milliseconds")
+      pw.println("Computed in "+(System.currentTimeMillis()-startTime)+" milliseconds")
+      
+      pw.close
       
       //Stop the Spark Context
       sc.stop()
