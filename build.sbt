@@ -21,4 +21,3 @@ sparkPackageName := "sramirez/infotheoretic-feature-selection"
 sparkVersion := "1.4.0"
 
 sparkComponents += "mllib"
-
