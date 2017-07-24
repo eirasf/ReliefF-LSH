@@ -104,17 +104,17 @@ object ReliefFFeatureSelector
 .coalesce(128, false)
             .map(//Group by class for each instance so that we can take K neighbors for each class for each instance
                 {
-                  case (x, nearestNeighborsByClass) => (x, nearestNeighborsByClass.groupBy({case (y, distances) => bnData.value(y).label}))
+                  case (x, neighbors) => (x, neighbors.groupBy({case (y, distances) => bnData.value(y).label}))
                 })
             .map(//Sort by distance and select K neighbors for each group
                 {
-                  case(x, nearestNeighborsByClass) =>
-                              (x,nearestNeighborsByClass.map(
+                  case(x, neighborsByClass) =>
+                              (x,neighborsByClass.map(
                                   {
                                     /*case (y, distances) => (y,distances.toSeq.sortBy({case(y,d) => d}) //Sort by distance
                                                                                         .take(numNeighbors)) //Take the K nearest neighbors
                                     */
-                                    case (y, distances) => val nearest=new Array[(Int,Double)](numNeighbors)
+                                    case (cl, distances) => val nearest=new Array[(Int,Double)](numNeighbors)
                                                             var curNeighbors=0
                                                             var maxDist=Double.MinValue
                                                             var maxDistIndex=0
@@ -148,7 +148,7 @@ object ReliefFFeatureSelector
                                                             val nearestRet=new Array[(Int,Double)](curNeighbors)
                                                             for(i <- 0 until curNeighbors)
                                                               nearestRet(i)=(nearest(i)._1,curNeighbors)
-                                                            (y, nearestRet)
+                                                            (cl, nearestRet)
                                    })
                                    //.map({case(y,distances) => (y,distances.map({case(y,d) => (y,distances.length)}))}) //Add the number of neighbors so that we can divide later
                               )
@@ -325,9 +325,10 @@ object ReliefFFeatureSelector
       var file=args(0)
       
       var fileOut=file.substring(0,file.lastIndexOf("."))+"-out.txt"
+      //fileOut="/home/ulc/co/cef/results-fs"+fileOut.substring(fileOut.lastIndexOf("/"))
       
       //Set up Spark Context
-      val conf = new SparkConf().setAppName("PruebaReliefF")//.setMaster("local[8]")
+      val conf = new SparkConf().setAppName("PruebaReliefF").setMaster("local[8]")
       conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 //      conf.set("spark.eventLog.enabled", "true")
 //      conf.set("spark.eventLog.dir","file:///home/eirasf/Escritorio/Tmp-work/sparklog-local")
