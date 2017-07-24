@@ -4,4 +4,8 @@
 .project
 *~
 .cache
+.DS_Store
+.cache-main
 /target/
+/project/target/
+/project/project/target/
