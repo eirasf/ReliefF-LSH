@@ -54,10 +54,14 @@ object ReliefFFeatureSelector
       var indices=sc.parallelize(0 to numElems.toInt-1)
       var cart=indices.cartesian(indices)//Will compare each instance with every other
       
+      
+      val normalizingDict=rangeAttributes.collectAsMap()
+      val bnNormalizingDict=sc.broadcast(normalizingDict)
+      
       if (discreteClass)
       {
         data.unpersist(false)
-        return selectDiscrete(cart, bnData, bnTypes, numNeighbors, rangeAttributes, countsClass.toMap, numElems);
+        return selectDiscrete(cart, bnData, bnTypes, numNeighbors, bnNormalizingDict, countsClass.toMap, numElems);
       }
       
       val maxMinClass=data.map(
@@ -71,10 +75,10 @@ object ReliefFFeatureSelector
       val rangeClass=maxMinClass._1-maxMinClass._2
       //printf("\n\nRange Class:"+rangeClass+"\n")
       data.unpersist(false)
-      return selectNumeric(cart, bnData, bnTypes, numNeighbors, rangeAttributes, countsClass.toMap, numElems, rangeClass)
+      return selectNumeric(cart, bnData, bnTypes, numNeighbors, bnNormalizingDict, countsClass.toMap, numElems, rangeClass)
     }
     
-    def selectDiscrete(indexPairs: RDD[(Int, Int)], bnData: Broadcast[Array[LabeledPoint]], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, rangeAttributes:  RDD[(Int, Double)], countsClass: Map[Double, Double], numElems: Double): RDD[(Int, Double)] =
+    def selectDiscrete(indexPairs: RDD[(Int, Int)], bnData: Broadcast[Array[LabeledPoint]], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, normalizingDict: Broadcast[scala.collection.Map[Int, Double]], countsClass: Map[Double, Double], numElems: Double): RDD[(Int, Double)] =
     {
       val dCD=indexPairs
                   .filter({case (x,y) => x<y})
@@ -94,7 +98,10 @@ object ReliefFFeatureSelector
                                   // for loop execution with a range
                                   for( a <- 0 to feat1.length-1)
                                     if (bnTypes.value(a))
-                                       dist=dist+math.abs(feat1(a)-feat2(a))
+                                    {
+                                       val range=normalizingDict.value(a)
+                                       dist=dist+math.abs(feat1(a)-feat2(a))/range
+                                    }
                                     else
                                       if (feat1(a)!=feat2(a))
                                        dist=dist+1.0
@@ -153,10 +160,11 @@ object ReliefFFeatureSelector
                                    //.map({case(y,distances) => (y,distances.map({case(y,d) => (y,distances.length)}))}) //Add the number of neighbors so that we can divide later
                               )
                 })
+            // (element, nearestNeighborsByClass) where nearestNeighborsByClass is a list of (cl, nearestsK) where nearestK is a list of (otherElement, k) (or <k if not enough neighbors for that class). 
             .flatMap(//Ungroup everything in order to get closer to having addends
                 {
                   case (x, nearestNeighborsByClass) =>
-                    nearestNeighborsByClass.flatMap({y=>List(y._2)}).flatten.map({y => (x,y)})
+                    nearestNeighborsByClass.flatMap({y=>List(y._2)}).flatten.map({case (otherElement,k) => (x,(otherElement,k))})
                 })
             .map(//Compute multipliers for each addend depending on their class
                 {
@@ -176,25 +184,37 @@ object ReliefFFeatureSelector
                                   var res:Array[(Int, Double)] = new Array[(Int, Double)](feat1.length)
                                   for( a <- 0 to feat1.length-1)
                                     if (bnTypes.value(a))
-                                       res(a)=(a,math.abs(feat1(a)-feat2(a))*s)
+                                    {
+                                       val range=normalizingDict.value(a)
+                                       res(a)=(a,math.abs(feat1(a)-feat2(a))*s/range)
+                                    }
                                     else
                                       if (feat1(a)!=feat2(a))
-                                       res(a)=(a,1.0)
+                                       res(a)=(a,s)//(a,1.0)
                                       else
                                        res(a)=(a,0.0)
                                   res
                 }
                 )
             .reduceByKey({_ + _})//Sum up for each attribute
-            .join(rangeAttributes)//In order to divide by the range of each attribute
+            /*.join(rangeAttributes)//In order to divide by the range of each attribute
             .map(//Add 1 to the attribNum so that is in the [1,N] range and divide each result by m and k.
                 {
-                  case(attribNum, (sum, range)) => (attribNum+1, sum/(range*numElems))
+                  case(attribNum, (sum, (min, range))) =>
+                    if (bnTypes.value(attribNum))
+                     (attribNum+1, sum/(range*numElems))
+                    else
+                     (attribNum+1, sum/numElems)
+                })*/
+            .map(//Add 1 to the attribNum so that is in the [1,N] range and divide each result by m
+                {
+                  case(attribNum, sum) =>
+                    (attribNum+1, sum/numElems)
                 })
       return dCD;
     }
     
-    def selectNumeric(indexPairs: RDD[(Int, Int)], bnData: Broadcast[Array[LabeledPoint]], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, rangeAttributes:  RDD[(Int, Double)], countsClass: Map[Double, Double], numElems: Double, rangeClass: Double): RDD[(Int, Double)] =
+    def selectNumeric(indexPairs: RDD[(Int, Int)], bnData: Broadcast[Array[LabeledPoint]], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, normalizingDict: Broadcast[scala.collection.Map[Int, Double]], countsClass: Map[Double, Double], numElems: Double, rangeClass: Double): RDD[(Int, Double)] =
     {
       val dCD=indexPairs //Will compare each instance with every other
                   //.repartition(8)//Repartition into a suitable number of partitions
@@ -213,7 +233,10 @@ object ReliefFFeatureSelector
                                   // for loop execution with a range
                                   for( a <- 0 to feat1.length-1)
                                     if (bnTypes.value(a))
-                                       dist=dist+math.abs(feat1(a)-feat2(a))
+                                    {
+                                       val range=normalizingDict.value(a)
+                                       dist=dist+math.abs(feat1(a)-feat2(a))/range
+                                    }
                                     else
                                       if (feat1(a)!=feat2(a))
                                        dist=dist+1.0
@@ -294,21 +317,27 @@ object ReliefFFeatureSelector
                                   var res:Array[(Int, (Double,Double))] = new Array[(Int, (Double,Double))](feat1.length)
                                   for( a <- 0 to feat1.length-1)
                                     if (bnTypes.value(a))
-                                       res(a)=(a,(math.abs(feat1(a)-feat2(a)), math.abs(feat1(a)-feat2(a))*math.abs(bnData.value(x).label-bnData.value(y).label)))
+                                    {
+                                       val range=normalizingDict.value(a)
+                                       res(a)=(a,(math.abs(feat1(a)-feat2(a))/range, math.abs(feat1(a)-feat2(a))*math.abs(bnData.value(x).label-bnData.value(y).label)/range)) //TODO - Class normalization
+                                    }
                                     else
                                       if (feat1(a)!=feat2(a))
-                                       res(a)=(a,(1.0,math.abs(bnData.value(x).label-bnData.value(y).label)))
+                                       res(a)=(a,(s,math.abs(bnData.value(x).label-bnData.value(y).label))) //TODO - Class normalization
                                       else
                                        res(a)=(a,(0.0,0.0))
                                   res
                 })
             .reduceByKey({case ((m_nda1, m_ndcda1), (m_nda2, m_ndcda2)) => (m_nda1 + m_nda2, m_ndcda1 + m_ndcda2)})//Sum up for each attribute
-            .join(rangeAttributes)//In order to divide by the range of each attribute
+            /*.join(rangeAttributes)//In order to divide by the range of each attribute
             .map(//Add 1 to the attribNum so that is in the [1,N] range and compute weights.
                 {
-                  case(attribNum, ((m_nda, m_ndcda),range)) => (attribNum+1, (m_ndcda/m_ndc - ((rangeClass*m_nda - m_ndcda)/(numNeighborsObtained*rangeClass*numElems-m_ndc)))/range)
+                  case(attribNum, ((m_nda, m_ndcda),(min,range))) => (attribNum+1, (m_ndcda/m_ndc - ((rangeClass*m_nda - m_ndcda)/(numNeighborsObtained*rangeClass*numElems-m_ndc)))/range)
+                })*/
+            .map(//Add 1 to the attribNum so that is in the [1,N] range and compute weights.
+                {
+                  case(attribNum, (m_nda, m_ndcda)) => (attribNum+1, (m_ndcda/m_ndc - ((rangeClass*m_nda - m_ndcda)/(numNeighborsObtained*rangeClass*numElems-m_ndc))))
                 })
-                
       dCD.unpersist(false)
       
       return weights
@@ -328,7 +357,7 @@ object ReliefFFeatureSelector
       //fileOut="/home/ulc/co/cef/results-fs"+fileOut.substring(fileOut.lastIndexOf("/"))
       
       //Set up Spark Context
-      val conf = new SparkConf().setAppName("PruebaReliefF").setMaster("local[8]")
+      val conf = new SparkConf().setAppName("PruebaReliefF")//.setMaster("local[8]")
       conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 //      conf.set("spark.eventLog.enabled", "true")
 //      conf.set("spark.eventLog.dir","file:///home/eirasf/Escritorio/Tmp-work/sparklog-local")
