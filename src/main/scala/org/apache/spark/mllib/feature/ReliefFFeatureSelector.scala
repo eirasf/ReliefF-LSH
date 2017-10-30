@@ -100,7 +100,8 @@ object ReliefFFeatureSelector
                                     if (bnTypes.value(a))
                                     {
                                        val range=normalizingDict.value(a)
-                                       dist=dist+math.abs(feat1(a)-feat2(a))/range
+                                       if (range!=0)
+                                         dist=dist+math.abs(feat1(a)-feat2(a))/range
                                     }
                                     else
                                       if (feat1(a)!=feat2(a))
@@ -186,7 +187,10 @@ object ReliefFFeatureSelector
                                     if (bnTypes.value(a))
                                     {
                                        val range=normalizingDict.value(a)
-                                       res(a)=(a,math.abs(feat1(a)-feat2(a))*s/range)
+                                       if (range==0)
+                                         res(a)=(a,0.0)
+                                       else
+                                         res(a)=(a,math.abs(feat1(a)-feat2(a))*s/range)
                                     }
                                     else
                                       if (feat1(a)!=feat2(a))
@@ -382,7 +386,7 @@ object ReliefFFeatureSelector
                           (0 to data.first().features.size-1).map({case c => true}).toArray
       if (attributeTypes.length!=data.first().features.size)
       {
-        println("The number of features does not match the instances in the file")
+        println("The number of features ("+attributeTypes.length+") does not match the instances in the file ("+data.first().features.size+")")
         return
       }
       
