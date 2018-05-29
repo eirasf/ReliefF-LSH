@@ -10,12 +10,53 @@ import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
 import java.io.PrintWriter
 import java.io.File
+import es.udc.graph.LookupProvider
+import es.udc.graph.BruteForceKNNGraphBuilder
+import es.udc.graph.BroadcastLookupProvider
+import es.udc.graph.DistanceProvider
+import es.udc.graph.BroadcastLookupProvider
+import es.udc.graph.LSHLookupKNNGraphBuilder
+import es.udc.graph.LookupProvider
+import es.udc.graph.DistanceProvider
+import es.udc.graph.GroupingProvider
+import es.udc.graph.DummyGroupingProvider
+
+class ReliefFDistanceProvider(bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]]) extends DistanceProvider
+{
+  def getDistance(p1:LabeledPoint,p2:LabeledPoint):Double=
+  {
+    val feat1=p1.features.toArray
+    val feat2=p2.features.toArray
+    var i = 0;
+    var dist=0.0
+    // for loop execution with a range
+    for( a <- 0 to feat1.length-1)
+      if (bnTypes.value(a))
+      {
+         val range=normalizingDict.value(a)
+         dist=dist+math.abs(feat1(a)-feat2(a))/range
+      }
+      else
+        if (feat1(a)!=feat2(a))
+         dist=dist+1.0
+    return dist
+  }
+}
+
+class ReliefFGroupingProvider(numClasses:Int) extends GroupingProvider
+{
+  def numGroups=numClasses
+  def getGroupId(p1:LabeledPoint):Int=
+  {
+    return p1.label.toInt
+  }
+}
 
 object ReliefFFeatureSelector
 {
-    private def getNNearest(distances:Iterable[(Int, Double)], numberOfSelected:Int):Array[(Int,Double)]=
+    private def getNNearest(distances:Iterable[(Long, Double)], numberOfSelected:Int):List[(Long,Double)]=
     {
-      val nearest=new Array[(Int,Double)](numberOfSelected)
+      val nearest=new Array[(Long,Double)](numberOfSelected)
       var curNeighbors=0
       var maxDist=Double.MinValue
       var maxDistIndex=0
@@ -46,17 +87,25 @@ object ReliefFFeatureSelector
             } 
           }
       }
-      val nearestRet=new Array[(Int,Double)](curNeighbors)
-      for(i <- 0 until curNeighbors)
-        nearestRet(i)=(nearest(i)._1,curNeighbors)
-      return nearestRet
+      return nearest.toList
+      //val nearestRet=new Array[(Long,Double)](curNeighbors)
+      //for(i <- 0 until curNeighbors)
+      //  nearestRet(i)=(nearest(i)._1,curNeighbors)
+      //return nearestRet.toList
     }
     
-    def getKNNGraph(sc: SparkContext, data:RDD[(LabeledPoint,Long)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]]):(RDD[(Long,List[(Long,Double)])],Broadcast[Array[LabeledPoint]])=
+    def getKNNGraph(sc: SparkContext, data:RDD[(LabeledPoint,Long)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]]):(RDD[(Long,List[(Long,Double)])],LookupProvider)=
+    {
+      val (graph,lookup)=getGroupedKNNGraph(sc, data, numNeighbors, bnTypes, normalizingDict, new DummyGroupingProvider())
+      return (graph.map({case (x,groupedNeighbors) => (x,groupedNeighbors.head._2)}),lookup)
+    }
+    
+    def getGroupedKNNGraph(sc: SparkContext, data:RDD[(LabeledPoint,Long)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], grouper:GroupingProvider):(RDD[(Long,List[(Int,List[(Long,Double)])])],LookupProvider)=
     {
       var rddIndices=data.map(_._2)
       var indexPairs=rddIndices.cartesian(rddIndices)
-      val bnData=sc.broadcast(data.sortBy(_._2).map(_._1).collect())
+      val lookup=new BroadcastLookupProvider(data)
+      val measurer=new ReliefFDistanceProvider(bnTypes, normalizingDict)
       val kNNGraph=indexPairs //Will compare each instance with every other
            //.repartition(8)//Repartition into a suitable number of partitions
             .filter({case (x,y) => x<y})
@@ -67,66 +116,49 @@ object ReliefFFeatureSelector
                                                            {case (sum,((a,i),b)) if (bnTypes.value(i)) => sum+math.abs(a-b) //Numeric
                                                            case (sum,((a,i),b)) => if (a!=b) sum+1.0 else sum}
                                                            )*/
-              case (x,y) => val feat1=bnData.value(x.toInt).features.toArray
-                            val feat2=bnData.value(y.toInt).features.toArray
-                            var i = 0;
-                            var dist=0.0
-                            // for loop execution with a range
-                            for( a <- 0 to feat1.length-1)
-                              if (bnTypes.value(a))
-                              {
-                                 val range=normalizingDict.value(a)
-                                 dist=dist+math.abs(feat1(a)-feat2(a))/range
-                              }
-                              else
-                                if (feat1(a)!=feat2(a))
-                                 dist=dist+1.0
+              case (x,y) => val dist=measurer.getDistance(lookup.lookup(x), lookup.lookup(y))
                             List((x, (y, dist)),(y, (x, dist)))
             })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
-            .map(//Sort by distance and select K neighbors for each instance
+            .map(//Group by class for each instance so that we can take K neighbors for each class for each instance
                 {
-                  /*case(x, distances) =>
-                              (x,distances.toSeq.sortBy({case(y,d) => d}) //Sort by distance
-                                          .take(numNeighbors)) //Take the K nearest neighbors
-                  */
-                  case (y, distances) => val nearest=new Array[(Long,Double)](numNeighbors)
-                                          var curNeighbors=0
-                                          var maxDist=Double.MinValue
-                                          var maxDistIndex=0
-                                          for(a <- distances)
-                                          {
-                                            if (curNeighbors<numNeighbors)
-                                            {
-                                              nearest(curNeighbors)=a
-                                              if (a._2>maxDist)
+                  case (x, neighbors) => (x, neighbors.groupBy(
                                               {
-                                                maxDist=a._2
-                                                maxDistIndex=curNeighbors
-                                              }
-                                              curNeighbors=curNeighbors+1
-                                            }
-                                            else
-                                              if (a._2<maxDist)
-                                              {
-                                                nearest(maxDistIndex)=a
-                                                maxDist=a._2
-                                                for(n <- 0 until nearest.length)
-                                                {
-                                                  if (nearest(n)._2>maxDist)
-                                                  {
-                                                    maxDist=nearest(n)._2
-                                                    maxDistIndex=n
-                                                  }
-                                                }
-                                              }
-                                          }
-                                          val nearestRet=new Array[(Long,Double)](numNeighbors)
-                                          for(i <- 0 until curNeighbors)
-                                            nearestRet(i)=(nearest(i)._1,curNeighbors)
-                                          (y, nearestRet.toList)
+                                                case (y, distances) =>
+                                                  val yVal=lookup.lookup(y)
+                                                  grouper.getGroupId(yVal)
+                                              }).toList
+                                         )
                 })
-      return (kNNGraph, bnData)
+            .map(//Sort by distance and select K neighbors for each group
+                {
+                  case(x, neighborsByClass) =>
+                              (x,neighborsByClass.map(
+                                  {
+                                    /*case (y, distances) => (y,distances.toSeq.sortBy({case(y,d) => d}) //Sort by distance
+                                                                                        .take(numNeighbors)) //Take the K nearest neighbors
+                                    */
+                                    case (cl, distances) => (cl, getNNearest(distances, numNeighbors))
+                                   })
+                                   //.map({case(y,distances) => (y,distances.map({case(y,d) => (y,distances.length)}))}) //Add the number of neighbors so that we can divide later
+                              )
+                })
+      return (kNNGraph, lookup)
+    }
+    
+    def getKNNGraphFromKNiNe(sc: SparkContext, data:RDD[(LabeledPoint,Long)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]]):(RDD[(Long,List[(Long,Double)])],LookupProvider)=
+    {
+      //val (graph,lookup)=BruteForceKNNGraphBuilder.parallelComputeGraph(data, numNeighbors, new ReliefFDistanceProvider(bnTypes, normalizingDict))
+      val (graph,lookup)=LSHLookupKNNGraphBuilder.computeGraph(data, numNeighbors, Some(2), Some(5), 0.25, -1, new ReliefFDistanceProvider(bnTypes, normalizingDict))
+      return (graph,
+              lookup)
+    }
+    
+    def getGroupedKNNGraphFromKNiNe(sc: SparkContext, data:RDD[(LabeledPoint,Long)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], grouper:GroupingProvider):(RDD[(Long,List[(Int,List[(Long,Double)])])],LookupProvider)=
+    {
+      //val (graph,lookup)=BruteForceKNNGraphBuilder.parallelComputeGraph(data, numNeighbors, new ReliefFDistanceProvider(bnTypes, normalizingDict))
+      val (graph,lookup)=LSHLookupKNNGraphBuilder.computeGroupedGraph(data, numNeighbors, Some(2), Some(5), 0.25, -1, new ReliefFDistanceProvider(bnTypes, normalizingDict), grouper)
+      return (graph,lookup)
     }
     
     def rankFeatures(sc: SparkContext, data: RDD[LabeledPoint], numNeighbors: Int, attributeNumeric: Array[Boolean], discreteClass: Boolean): RDD[(Int, Double)] =
@@ -172,7 +204,7 @@ object ReliefFFeatureSelector
       if (discreteClass)
       {
         data.unpersist(false)
-        return selectDiscrete(sc, data, bnTypes, numNeighbors, bnNormalizingDict, countsClass.toMap, numElems);
+        return selectDiscrete(sc, numberedData, bnTypes, numNeighbors, bnNormalizingDict, countsClass.toMap, numElems);
       }
       
       val maxMinClass=data.map(
@@ -189,70 +221,20 @@ object ReliefFFeatureSelector
       return selectNumeric(sc, numberedData, bnTypes, numNeighbors, bnNormalizingDict, countsClass.toMap, numElems, rangeClass)
     }
     
-    def selectDiscrete(sc: SparkContext, data: RDD[LabeledPoint], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, normalizingDict: Broadcast[scala.collection.Map[Int, Double]], countsClass: Map[Double, Double], numElems: Double): RDD[(Int, Double)] =
+    def selectDiscrete(sc: SparkContext, data: RDD[(LabeledPoint,Long)], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, normalizingDict: Broadcast[scala.collection.Map[Int, Double]], countsClass: Map[Double, Double], numElems: Double): RDD[(Int, Double)] =
     {
-      var indices=sc.parallelize(0 to numElems.toInt-1)
-      var indexPairs=indices.cartesian(indices)//Will compare each instance with every other
-      //Data is broadcasted in order to reduce memory usage. Indices are used to access its elements.
-      val bnData=sc.broadcast(data.collect())
-      
-      val dCD=indexPairs
-                  .filter({case (x,y) => x<y})
-.repartition(256)//Repartition into a suitable number of partitions
-                  .flatMap(//Remove comparisons between an instance and itself and compute distances
-                  {
-                    /*case (x,y) => val dist=bnData.value(x).features.toArray.zipWithIndex.zip(bnData.value(y).features.toArray)
-                                                              .foldLeft(0.0)(
-                                                                 {case (sum,((a,i),b)) if (bnTypes.value(i)) => sum+math.abs(a-b) //Numeric
-                                                                 case (sum,((a,i),b)) => if (a!=b) sum+1.0 else sum}
-                                                                 )
-                                  List((x, (y, dist)),(y, (x, dist)))*/
-                    case (x,y) => val feat1=bnData.value(x).features.toArray
-                                  val feat2=bnData.value(y).features.toArray
-                                  var i = 0;
-                                  var dist=0.0
-                                  // for loop execution with a range
-                                  for( a <- 0 to feat1.length-1)
-                                    if (bnTypes.value(a))
-                                    {
-                                       val range=normalizingDict.value(a)
-                                       if (range!=0)
-                                         dist=dist+math.abs(feat1(a)-feat2(a))/range
-                                    }
-                                    else
-                                      if (feat1(a)!=feat2(a))
-                                       dist=dist+1.0
-                                  List((x, (y, dist)),(y, (x, dist)))
-                  })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
-            .groupByKey//Group by instance
-.coalesce(128, false)
-            .map(//Group by class for each instance so that we can take K neighbors for each class for each instance
-                {
-                  case (x, neighbors) => (x, neighbors.groupBy({case (y, distances) => bnData.value(y).label}))
-                })
-            .map(//Sort by distance and select K neighbors for each group
-                {
-                  case(x, neighborsByClass) =>
-                              (x,neighborsByClass.map(
-                                  {
-                                    /*case (y, distances) => (y,distances.toSeq.sortBy({case(y,d) => d}) //Sort by distance
-                                                                                        .take(numNeighbors)) //Take the K nearest neighbors
-                                    */
-                                    case (cl, distances) => (cl, getNNearest(distances, numNeighbors))
-                                   })
-                                   //.map({case(y,distances) => (y,distances.map({case(y,d) => (y,distances.length)}))}) //Add the number of neighbors so that we can divide later
-                              )
-                })
-            // (element, nearestNeighborsByClass) where nearestNeighborsByClass is a list of (cl, nearestsK) where nearestK is a list of (otherElement, k) (or <k if not enough neighbors for that class). 
-            .flatMap(//Ungroup everything in order to get closer to having addends
+      //val (kNNGraph,lookup)=getGroupedKNNGraph(sc, data, numNeighbors, bnTypes, normalizingDict, new ReliefFGroupingProvider(countsClass.size))
+      val (kNNGraph,lookup)=getGroupedKNNGraphFromKNiNe(sc, data, numNeighbors, bnTypes, normalizingDict, new ReliefFGroupingProvider(countsClass.size))
+      val dCD=kNNGraph
+              .flatMap(//Ungroup everything in order to get closer to having addends
                 {
                   case (x, nearestNeighborsByClass) =>
-                    nearestNeighborsByClass.flatMap({y=>List(y._2)}).flatten.map({case (otherElement,k) => (x,(otherElement,k))})
+                    nearestNeighborsByClass.flatMap({y=>List(y._2.map({case (p,d) => (p,y._2.length)}))}).flatten.map({case (otherElement,k) => (x,(otherElement,k))})
                 })
             .map(//Compute multipliers for each addend depending on their class
                 {
-                  case(x,(y,k)) if (bnData.value(x).label==bnData.value(y).label) => (x, y, -1.0/k)
-                  case(x,(y,k)) if (bnData.value(x).label!=bnData.value(y).label) => (x, y, countsClass.get(bnData.value(y).label).get/((1.0-countsClass.get(bnData.value(x).label).get)*k))
+                  case(x,(y,k)) if (lookup.lookup(x).label==lookup.lookup(y).label) => (x, y, -1.0/k)
+                  case(x,(y,k)) if (lookup.lookup(x).label!=lookup.lookup(y).label) => (x, y, countsClass.get(lookup.lookup(y).label).get/((1.0-countsClass.get(lookup.lookup(x).label).get)*k))
                 }
                 )
             .flatMap(//Separate everything into addends for each attribute, and rearrange so that the attribute index is the key 
@@ -261,8 +243,8 @@ object ReliefFFeatureSelector
                                                                              {case ((x,y),i) if (bnTypes.value(i)) => (i, math.abs(x-y)*s)//Numeric
                                                                              case ((fx,fy),i) => (i, if (fx!=fy) 1.0 else 0.0)})//Nominal
                   */
-                  case(x, y, s) => val feat1=bnData.value(x).features.toArray
-                                  val feat2=bnData.value(y).features.toArray
+                  case(x, y, s) => val feat1=lookup.lookup(x).features.toArray
+                                  val feat2=lookup.lookup(y).features.toArray
                                   var i = 0;
                                   var res:Array[(Int, Double)] = new Array[(Int, Double)](feat1.length)
                                   for( a <- 0 to feat1.length-1)
@@ -302,8 +284,21 @@ object ReliefFFeatureSelector
     
     def selectNumeric(sc: SparkContext, data: RDD[(LabeledPoint, Long)], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, normalizingDict: Broadcast[scala.collection.Map[Int, Double]], countsClass: Map[Double, Double], numElems: Double, rangeClass: Double): RDD[(Int, Double)] =
     {
-      val (kNNGraph,bnData)=getKNNGraph(sc, data, numNeighbors, bnTypes, normalizingDict)
+      //val (kNNGraph,lookup)=getKNNGraph(sc, data, numNeighbors, bnTypes, normalizingDict)
+      val (kNNGraph,lookup)=getKNNGraphFromKNiNe(sc, data, numNeighbors, bnTypes, normalizingDict)
+      /*println(kNNGraph.map(
+                {
+                  case (index,neighbors) =>
+                    (index,neighbors.sortBy(_._2))
+                }
+                ).sortBy(_._1).first())*/
       val dCD=kNNGraph
+            .map(
+                {
+                  case (index,neighbors) =>
+                    (index,neighbors.sortBy(_._2).map({case (idx,distance) => (idx,neighbors.length.toDouble)}))
+                }
+                )
             /*.map(
                 {
                   case(x,distances) =>
@@ -317,7 +312,7 @@ object ReliefFFeatureSelector
       dCD.cache()          
       val m_ndc=dCD.map(
                 {
-                  case (x, (y,k)) => (math.abs(bnData.value(x.toInt).label-bnData.value(y.toInt).label))
+                  case (x, (y,k)) => (math.abs(lookup.lookup(x.toInt).label-lookup.lookup(y.toInt).label))
                 }) //Will be normalized when computing the weight
                 .reduce(_+_)
       
@@ -330,19 +325,19 @@ object ReliefFFeatureSelector
                                                                                case ((a,b),i) if (bnTypes.value(i)) => (i,(math.abs(a-b), math.abs(a-b)*(math.abs(bnData.value(x).label-bnData.value(y).label))))//Numeric
                                                                                case ((fx,fy),i) => (i, (if (fx!=fy) 1.0 else 0.0, if (fx!=fy) math.abs(bnData.value(x).label-bnData.value(y).label) else 0.0))})//Nominal
                   */
-                  case(x, (y, s)) => val feat1=bnData.value(x.toInt).features.toArray
-                                  val feat2=bnData.value(y.toInt).features.toArray
+                  case(x, (y, s)) => val feat1=lookup.lookup(x).features.toArray
+                                  val feat2=lookup.lookup(y).features.toArray
                                   var i = 0;
                                   var res:Array[(Int, (Double,Double))] = new Array[(Int, (Double,Double))](feat1.length)
                                   for( a <- 0 to feat1.length-1)
                                     if (bnTypes.value(a))
                                     {
                                        val range=normalizingDict.value(a)
-                                       res(a)=(a,(math.abs(feat1(a)-feat2(a))/range, math.abs(feat1(a)-feat2(a))*math.abs(bnData.value(x.toInt).label-bnData.value(y.toInt).label)/range)) //TODO - Class normalization
+                                       res(a)=(a,(math.abs(feat1(a)-feat2(a))/range, math.abs(feat1(a)-feat2(a))*math.abs(lookup.lookup(x).label-lookup.lookup(y).label)/range)) //TODO - Class normalization
                                     }
                                     else
                                       if (feat1(a)!=feat2(a))
-                                       res(a)=(a,(s,math.abs(bnData.value(x.toInt).label-bnData.value(y.toInt).label))) //TODO - Class normalization
+                                       res(a)=(a,(s,math.abs(lookup.lookup(x).label-lookup.lookup(y).label))) //TODO - Class normalization
                                       else
                                        res(a)=(a,(0.0,0.0))
                                   res
@@ -407,7 +402,7 @@ object ReliefFFeatureSelector
       }
       
       var discreteClass=(args.length<4) || ((args(3)!="n") && (args(3)!="N"))
-      discreteClass=false//DEBUG!!!!!!!!!!!!!!!!!!!
+      //discreteClass=false//DEBUG!!!!!!!!!!!!!!!!!!!
       
       val pw = new PrintWriter(new File(fileOut))
       
