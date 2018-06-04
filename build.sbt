@@ -6,7 +6,7 @@ organization := "com.github.sramirez"
 
 scalaVersion := "2.10.4"
 
-libraryDependencies += "org.apache.spark" %% "spark-mllib" % "1.4.0"
+unmanagedJars in Compile += file("lib/spark-knine-0.2.jar")
 
 resolvers ++= Seq(
   "Apache Staging" at "https://repository.apache.org/content/repositories/staging/",
