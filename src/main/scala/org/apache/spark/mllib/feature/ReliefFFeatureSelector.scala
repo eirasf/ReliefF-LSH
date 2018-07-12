@@ -154,16 +154,18 @@ object ReliefFFeatureSelector
     def getKNNGraphFromKNiNe(sc: SparkContext, data:RDD[(LabeledPoint,Long)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], lshConf:KNiNeConfiguration):(RDD[(Long,List[(Long,Double)])],LookupProvider)=
     {
       //val (graph,lookup)=BruteForceKNNGraphBuilder.parallelComputeGraph(data, numNeighbors, new ReliefFDistanceProvider(bnTypes, normalizingDict))
-      val (graph,lookup)=LSHLookupKNNGraphBuilder.computeGraph(data, numNeighbors, lshConf.keyLength, lshConf.numTables, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict))
+      val builder=new LSHLookupKNNGraphBuilder(data)
+      val graph=builder.computeGraph(data, numNeighbors, lshConf.keyLength, lshConf.numTables, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict))
       return (graph,
-              lookup)
+              builder.lookup)
     }
     
     def getGroupedKNNGraphFromKNiNe(sc: SparkContext, data:RDD[(LabeledPoint,Long)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], grouper:GroupingProvider, lshConf:KNiNeConfiguration):(RDD[(Long,List[(Int,List[(Long,Double)])])],LookupProvider)=
     {
       //val (graph,lookup)=BruteForceKNNGraphBuilder.parallelComputeGraph(data, numNeighbors, new ReliefFDistanceProvider(bnTypes, normalizingDict))
-      val (graph,lookup)=LSHLookupKNNGraphBuilder.computeGroupedGraph(data, numNeighbors, lshConf.keyLength, lshConf.numTables, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict), grouper)
-      return (graph,lookup)
+      val builder=new LSHLookupKNNGraphBuilder(data)
+      val graph=builder.computeGroupedGraph(data, numNeighbors, lshConf.keyLength, lshConf.numTables, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict), grouper)
+      return (graph,builder.lookup)
     }
     
     def rankFeatures(sc: SparkContext, data: RDD[LabeledPoint], numNeighbors: Int, attributeNumeric: Array[Boolean], discreteClass: Boolean, lshConf:Option[KNiNeConfiguration]): RDD[(Int, Double)] =
@@ -201,6 +203,7 @@ object ReliefFFeatureSelector
       
       
       val numberedData=data.zipWithIndex()
+      printf("MaxIndex: %d\n\n",numberedData.map(_._2).max())
       val bnTypes=sc.broadcast(attributeNumeric)
       
       val normalizingDict=rangeAttributes.collectAsMap()
@@ -375,8 +378,8 @@ object ReliefFFeatureSelector
       var fileOut=options("output").asInstanceOf[String]
       
       //Set up Spark Context
-      val conf = new SparkConf().setAppName("PruebaReliefF")//.setMaster("local[8]") //DEBUG!!!!!!!!!!!!!!!!!!!!!!!
-      conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      val conf = new SparkConf()//.setAppName("PruebaReliefF").setMaster("local[8]") //DEBUG!!!!!!!!!!!!!!!!!!!!!!!
+      //conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 //      conf.set("spark.eventLog.enabled", "true")
 //      conf.set("spark.eventLog.dir","file:///home/eirasf/Escritorio/Tmp-work/sparklog-local")
       
@@ -385,7 +388,7 @@ object ReliefFFeatureSelector
       
       //Load data from file
       //val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/LargeDatasets/libsvm/isoletTrain.libsvm")
-      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, file)
+      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, file, -1, 3*sc.defaultParallelism)
       //val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/car-mini.libsvm")
       
       //Set maximum number of near neighbors to be taken into account for each instance
