@@ -378,13 +378,13 @@ object ReliefFFeatureSelector
       var fileOut=options("output").asInstanceOf[String]
       
       //Set up Spark Context
-      val conf = new SparkConf()//.setAppName("PruebaReliefF").setMaster("local[8]") //DEBUG!!!!!!!!!!!!!!!!!!!!!!!
+      val conf = new SparkConf().setAppName("PruebaReliefF").setMaster("local[8]") //DEBUG!!!!!!!!!!!!!!!!!!!!!!!
       //conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 //      conf.set("spark.eventLog.enabled", "true")
 //      conf.set("spark.eventLog.dir","file:///home/eirasf/Escritorio/Tmp-work/sparklog-local")
       
       val sc=new SparkContext(conf)
-      //sc.setLogLevel("WARN")//DEBUG!!!!!!!!!!!!!!!!!!!!!!!
+      sc.setLogLevel("WARN")//DEBUG!!!!!!!!!!!!!!!!!!!!!!!
       
       //Load data from file
       //val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/LargeDatasets/libsvm/isoletTrain.libsvm")

@@ -4,9 +4,10 @@ version := "0.1"
 
 organization := "com.github.sramirez"
 
-scalaVersion := "2.10.4"
+scalaVersion := "2.11.11"
 
 unmanagedJars in Compile += file("lib/spark-knine-0.2.jar")
+unmanagedJars in Compile += file("lib/spark-knn-0.2.0.jar")
 
 resolvers ++= Seq(
   "Apache Staging" at "https://repository.apache.org/content/repositories/staging/",
@@ -18,6 +19,6 @@ publishMavenStyle := true
 
 sparkPackageName := "sramirez/infotheoretic-feature-selection"
 
-sparkVersion := "1.4.0"
+sparkVersion := "2.3.0"
 
 sparkComponents += "mllib"
