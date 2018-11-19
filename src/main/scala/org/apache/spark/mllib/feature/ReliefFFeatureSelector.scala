@@ -10,18 +10,15 @@ import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
 import java.io.PrintWriter
 import java.io.File
-import es.udc.graph.LookupProvider
-import es.udc.graph.BruteForceKNNGraphBuilder
-import es.udc.graph.BroadcastLookupProvider
-import es.udc.graph.DistanceProvider
-import es.udc.graph.BroadcastLookupProvider
 import es.udc.graph.LSHLookupKNNGraphBuilder
-import es.udc.graph.LookupProvider
-import es.udc.graph.DistanceProvider
-import es.udc.graph.GroupingProvider
-import es.udc.graph.DummyGroupingProvider
 import es.udc.graph.LSHKNNGraphBuilder
+import es.udc.graph.DummyGroupingProvider
+import es.udc.graph.DistanceProvider
 import es.udc.graph.KNiNeConfiguration
+import es.udc.graph.GroupingProvider
+import es.udc.graph.EuclideanLSHasher
+import es.udc.graph.BroadcastLookupProvider
+import es.udc.graph.LookupProvider
 
 class ReliefFDistanceProvider(bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]]) extends DistanceProvider
 {
@@ -164,7 +161,13 @@ object ReliefFFeatureSelector
     {
       //val (graph,lookup)=BruteForceKNNGraphBuilder.parallelComputeGraph(data, numNeighbors, new ReliefFDistanceProvider(bnTypes, normalizingDict))
       val builder=new LSHLookupKNNGraphBuilder(data)
-      val graph=builder.computeGroupedGraph(data, numNeighbors, lshConf.keyLength, lshConf.numTables, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict), grouper)
+      val graph=if ((lshConf.keyLength>0) && (lshConf.numTables>0))
+                  builder.computeGroupedGraph(data, numNeighbors, lshConf.keyLength, lshConf.numTables, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict), grouper)
+                else
+                {
+                  val (hasher,nComps,suggestedRadius)=EuclideanLSHasher.getHasherForDataset(data, 1, lshConf.radius0)
+                  builder.computeGroupedGraph(data, numNeighbors, hasher, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict), grouper)
+                }
       return (graph,builder.lookup)
     }
     
@@ -378,13 +381,13 @@ object ReliefFFeatureSelector
       var fileOut=options("output").asInstanceOf[String]
       
       //Set up Spark Context
-      val conf = new SparkConf().setAppName("PruebaReliefF").setMaster("local[8]") //DEBUG!!!!!!!!!!!!!!!!!!!!!!!
+      val conf = new SparkConf()//.setAppName("PruebaReliefF").setMaster("local[8]") //DEBUG!!!!!!!!!!!!!!!!!!!!!!!
       //conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 //      conf.set("spark.eventLog.enabled", "true")
 //      conf.set("spark.eventLog.dir","file:///home/eirasf/Escritorio/Tmp-work/sparklog-local")
       
       val sc=new SparkContext(conf)
-      sc.setLogLevel("WARN")//DEBUG!!!!!!!!!!!!!!!!!!!!!!!
+      //sc.setLogLevel("WARN")//DEBUG!!!!!!!!!!!!!!!!!!!!!!!
       
       //Load data from file
       //val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/LargeDatasets/libsvm/isoletTrain.libsvm")

@@ -1,10 +1,11 @@
 package org.apache.spark.mllib.feature
 
-import org.apache.spark.ml.classification.KNNClassifier
+//import org.apache.spark.ml.classification.KNNClassifier
 import org.apache.spark.mllib.util.MLUtils
 import org.apache.spark.sql.SparkSession
 
 import es.udc.graph.LSHKNNGraphBuilder
+import org.apache.spark.ml.classification.KNNFinder
 
 
 object TestFeatureSelector
@@ -24,7 +25,7 @@ object TestFeatureSelector
 //      conf.set("spark.eventLog.dir","file:///home/eirasf/Escritorio/Tmp-work/sparklog-local")
       
       val spark = SparkSession.builder.appName("Simple Application")
-                                    .master("local[8]")
+                                    .master("local[1]")
                                     .getOrCreate()
       
       //val sc=new SparkContext(conf)
@@ -61,13 +62,24 @@ object TestFeatureSelector
       val training = MLUtils.loadLibSVMFile(sc, "file:///mnt/NTFS/owncloud/LargeDatasets/libsvm/car.libsvm").toDF()
       val trainingML = MLUtils.convertVectorColumnsToML(training)
       
-      val knn = new KNNClassifier()
+      val knn = new KNNFinder()
         .setTopTreeSize(trainingML.count().toInt / 500)
         .setK(numNeighbors)
       
-      val knnModel = knn.fit(trainingML.toDF())
+      val knnModel = knn.fitFinder(trainingML.toDF())
       
-      print(knnModel.topTree)
+      println(knnModel.topTree)
+      
+      val original=trainingML.sort($"features").head(50)
+      val neighbors=knnModel.find(trainingML.toDF()).take(50)
+      
+      for ((e,n) <- neighbors)
+      {
+        println("ORIGINAL:"+e)
+        for (ng <- n)
+          println("\t"+ng)
+      }
+      
       
       
       //Stop the Spark Context
