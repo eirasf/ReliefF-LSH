@@ -390,9 +390,14 @@ object ReliefFFeatureSelector
       val sc=new SparkContext(conf)
       //sc.setLogLevel("WARN")//DEBUG!!!!!!!!!!!!!!!!!!!!!!!
       
+      val numPartitions:Option[Int]=if (options.contains("num_neighbors"))
+                                      Some(options("num_neighbors").asInstanceOf[Double].toInt)
+                                    else
+                                      None
+      
       //Load data from file
       //val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/LargeDatasets/libsvm/isoletTrain.libsvm")
-      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, file, -1, 3*sc.defaultParallelism)
+      val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, file, -1, numPartitions.getOrElse(3*sc.defaultParallelism))
       //val data: RDD[LabeledPoint] = MLUtils.loadLibSVMFile(sc, "/home/eirasf/Escritorio/Paralelización/Data sets/libsvm/car-mini.libsvm")
       
       //Set maximum number of near neighbors to be taken into account for each instance
@@ -467,7 +472,7 @@ object ReliefFFeatureSelector
         -m    Method used to compute the graph. Valid values: lsh, brute (default: """+ReliefFFeatureSelector.DEFAULT_METHOD+""")
         -r    Starting radius (default: """+LSHKNNGraphBuilder.DEFAULT_RADIUS_START+""")
         -c    Maximum comparisons per item (default: auto)
-        -f    Fast. Do a faster approximation of the kNN graph (default: no)
+        -p    Number of partitions for the data RDDs (default: 3*sc.defaultParallelism)
     
     Advanced LSH options:
         -n    Number of hashes per item (default: auto)
@@ -506,7 +511,7 @@ object ReliefFFeatureSelector
             case "l"   => "key_length"
             case "c"   => "max_comparisons"
             case "o"   => "output"
-            case "f"   => "fast"
+            case "p"   => "num_partitions"
             case somethingElse => readOptionName
           }
         if (!m.keySet.exists(_==option) && option==readOptionName)
@@ -529,16 +534,10 @@ object ReliefFFeatureSelector
           if ((option=="class_type") || (option=="attribute_types") || (option=="output"))
             m(option)=p(i+1)
           else
-            if (option!="fast")
-              m(option)=p(i+1).toDouble
-            else
-              m(option)=true
+            m(option)=p(i+1).toDouble
         }
         
-        if (option=="fast")
-          i=i+1
-        else
-          i=i+2
+        i=i+2
       }
       return m.toMap
     }
