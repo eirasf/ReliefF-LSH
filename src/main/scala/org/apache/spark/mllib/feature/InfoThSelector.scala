@@ -24,13 +24,13 @@ import org.apache.spark.SparkException
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.mllib.linalg.{Vector, DenseVector, SparseVector}
 import org.apache.spark.annotation.Experimental
-import org.apache.spark.Logging
 import org.apache.spark.mllib.feature.{InfoThCriterionFactory => FT}
 import org.apache.spark.mllib.feature.{InfoTheory => IT}
 import breeze.linalg.{DenseVector => BDV, SparseVector => BSV, Vector => BV, DenseMatrix => BDM}
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.HashPartitioner
 import scala.collection.BitSet
+import org.apache.spark.internal.Logging
 
 /**
  * Train a info-theory feature selection (FS) model according to a criterion.

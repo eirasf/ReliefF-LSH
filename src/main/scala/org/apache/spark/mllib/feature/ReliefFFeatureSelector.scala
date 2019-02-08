@@ -106,7 +106,7 @@ object ReliefFFeatureSelector
     {
       var rddIndices=data.map(_._2)
       var indexPairs=rddIndices.cartesian(rddIndices)
-      val lookup=new BroadcastLookupProvider(data)
+      val lookup=new BroadcastLookupProvider(data.map(_.swap))
       val measurer=new ReliefFDistanceProvider(bnTypes, normalizingDict)
       val kNNGraph=indexPairs //Will compare each instance with every other
            //.repartition(8)//Repartition into a suitable number of partitions
@@ -148,21 +148,21 @@ object ReliefFFeatureSelector
       return (kNNGraph, lookup)
     }
     
-    def getKNNGraphFromKNiNe(sc: SparkContext, data:RDD[(LabeledPoint,Long)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], lshConf:KNiNeConfiguration):(RDD[(Long,List[(Long,Double)])],LookupProvider)=
+    def getKNNGraphFromKNiNe(sc: SparkContext, data:RDD[(Long,LabeledPoint)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], lshConf:KNiNeConfiguration):(RDD[(Long,List[(Long,Double)])],LookupProvider)=
     {
       //val (graph,lookup)=BruteForceKNNGraphBuilder.parallelComputeGraph(data, numNeighbors, new ReliefFDistanceProvider(bnTypes, normalizingDict))
       val builder=new LSHLookupKNNGraphBuilder(data)
-      val graph=builder.computeGraph(data, numNeighbors, lshConf.keyLength, lshConf.numTables, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict))
+      val graph=builder.computeGraph(data, numNeighbors, lshConf.keyLength.get, lshConf.numTables.get, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict))
       return (graph,
               builder.lookup)
     }
     
-    def getGroupedKNNGraphFromKNiNe(sc: SparkContext, data:RDD[(LabeledPoint,Long)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], grouper:GroupingProvider, lshConf:KNiNeConfiguration):(RDD[(Long,List[(Int,List[(Long,Double)])])],LookupProvider)=
+    def getGroupedKNNGraphFromKNiNe(sc: SparkContext, data:RDD[(Long,LabeledPoint)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], grouper:GroupingProvider, lshConf:KNiNeConfiguration):(RDD[(Long,List[(Int,List[(Long,Double)])])],LookupProvider)=
     {
       //val (graph,lookup)=BruteForceKNNGraphBuilder.parallelComputeGraph(data, numNeighbors, new ReliefFDistanceProvider(bnTypes, normalizingDict))
       val builder=new LSHLookupKNNGraphBuilder(data)
-      val graph=if ((lshConf.keyLength>0) && (lshConf.numTables>0))
-                  builder.computeGroupedGraph(data, numNeighbors, lshConf.keyLength, lshConf.numTables, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict), grouper)
+      val graph=if (lshConf.keyLength.isDefined && lshConf.numTables.isDefined)
+                  builder.computeGroupedGraph(data, numNeighbors, lshConf.keyLength.get, lshConf.numTables.get, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict), grouper)
                 else
                 {
                   val factor=4.0
@@ -236,7 +236,7 @@ object ReliefFFeatureSelector
     def selectDiscrete(sc: SparkContext, data: RDD[(LabeledPoint,Long)], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, normalizingDict: Broadcast[scala.collection.Map[Int, Double]], countsClass: Map[Double, Double], numElems: Double, lshConf:Option[KNiNeConfiguration]): RDD[(Int, Double)] =
     {
       val (kNNGraph,lookup)=if (lshConf.isDefined)
-                              getGroupedKNNGraphFromKNiNe(sc, data, numNeighbors, bnTypes, normalizingDict, new ReliefFGroupingProvider(countsClass.keys), lshConf.get) 
+                              getGroupedKNNGraphFromKNiNe(sc, data.map(_.swap), numNeighbors, bnTypes, normalizingDict, new ReliefFGroupingProvider(countsClass.keys), lshConf.get) 
                             else
                               getGroupedKNNGraph(sc, data, numNeighbors, bnTypes, normalizingDict, new ReliefFGroupingProvider(countsClass.keys))
       val dCD=kNNGraph
@@ -299,7 +299,7 @@ object ReliefFFeatureSelector
     def selectNumeric(sc: SparkContext, data: RDD[(LabeledPoint, Long)], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, normalizingDict: Broadcast[scala.collection.Map[Int, Double]], countsClass: Map[Double, Double], numElems: Double, rangeClass: Double, lshConf:Option[KNiNeConfiguration]): RDD[(Int, Double)] =
     {
       val (kNNGraph,lookup)=if (lshConf.isDefined)
-                              getKNNGraphFromKNiNe(sc, data, numNeighbors, bnTypes, normalizingDict, lshConf.get)
+                              getKNNGraphFromKNiNe(sc, data.map(_.swap), numNeighbors, bnTypes, normalizingDict, lshConf.get)
                             else
                               getKNNGraph(sc, data, numNeighbors, bnTypes, normalizingDict)
       /*println(kNNGraph.map(
