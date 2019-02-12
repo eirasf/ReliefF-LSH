@@ -389,6 +389,7 @@ object ReliefFFeatureSelector
       
       val sc=new SparkContext(conf)
       //sc.setLogLevel("WARN")//DEBUG!!!!!!!!!!!!!!!!!!!!!!!
+      println(s"Default parallelism: ${sc.defaultParallelism}")
       
       val numPartitions:Option[Int]=if (options.contains("num_neighbors"))
                                       Some(options("num_neighbors").asInstanceOf[Double].toInt)
