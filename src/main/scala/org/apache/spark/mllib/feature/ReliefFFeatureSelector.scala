@@ -167,7 +167,7 @@ object ReliefFFeatureSelector
                 {
                   val factor=4.0
                   val (hasher,nComps,suggestedRadius)=EuclideanLSHasher.getHasherForDataset(data, (factor*numNeighbors).toInt)
-                  builder.computeGroupedGraph(data, numNeighbors, hasher, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict), grouper)
+                  builder.computeGroupedGraph(data, numNeighbors, hasher, Some(lshConf.radius0.getOrElse(suggestedRadius)), lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict), grouper)
                 }
       return (graph,builder.lookup)
     }
