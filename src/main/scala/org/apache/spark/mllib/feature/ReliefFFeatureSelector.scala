@@ -484,8 +484,7 @@ object ReliefFFeatureSelector
     def parseParams(p:Array[String]):Map[String, Any]=
     {
       val m=scala.collection.mutable.Map[String, Any]("num_neighbors" -> ReliefFFeatureSelector.DEFAULT_K.toDouble,
-                                                      "method" -> ReliefFFeatureSelector.DEFAULT_METHOD,
-                                                      "radius_start" -> LSHKNNGraphBuilder.DEFAULT_RADIUS_START)
+                                                      "method" -> ReliefFFeatureSelector.DEFAULT_METHOD)
       if (p.length<=0)
         showUsageAndExit()
       
