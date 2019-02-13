@@ -164,11 +164,7 @@ object ReliefFFeatureSelector
       val graph=if (lshConf.keyLength.isDefined && lshConf.numTables.isDefined)
                   builder.computeGroupedGraph(data, numNeighbors, lshConf.keyLength.get, lshConf.numTables.get, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict), grouper)
                 else
-                {
-                  val factor=4.0
-                  val (hasher,nComps,suggestedRadius)=EuclideanLSHasher.getHasherForDataset(data, (factor*numNeighbors).toInt)
-                  builder.computeGroupedGraph(data, numNeighbors, hasher, Some(lshConf.radius0.getOrElse(suggestedRadius)), lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict), grouper)
-                }
+                  builder.computeGroupedGraph(data, numNeighbors, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict), grouper)
       return (graph,builder.lookup)
     }
     
@@ -389,7 +385,7 @@ object ReliefFFeatureSelector
       
       val sc=new SparkContext(conf)
       //sc.setLogLevel("WARN")//DEBUG!!!!!!!!!!!!!!!!!!!!!!!
-      println(s"Default parallelism: ${sc.defaultParallelism}")
+      println(s"Application Name:${sc.appName}\nDefault parallelism: ${sc.defaultParallelism}")
       
       val numPartitions:Option[Int]=if (options.contains("num_partitions"))
                                       Some(options("num_partitions").asInstanceOf[Double].toInt)
