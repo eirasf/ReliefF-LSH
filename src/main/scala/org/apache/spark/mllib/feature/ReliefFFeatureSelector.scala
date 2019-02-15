@@ -19,6 +19,7 @@ import es.udc.graph.GroupingProvider
 import es.udc.graph.EuclideanLSHasher
 import es.udc.graph.BroadcastLookupProvider
 import es.udc.graph.LookupProvider
+import org.apache.spark.HashPartitioner
 
 class ReliefFDistanceProvider(bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]]) extends DistanceProvider
 {
@@ -33,7 +34,10 @@ class ReliefFDistanceProvider(bnTypes: Broadcast[Array[Boolean]], normalizingDic
       if (bnTypes.value(a))
       {
          val range=normalizingDict.value(a)
-         dist=dist+math.abs(feat1(a)-feat2(a))/range
+         if (math.abs(range)>0)
+           dist=dist+math.abs(feat1(a)-feat2(a))/range
+         else
+           dist=dist+math.abs(feat1(a)-feat2(a))
       }
       else
         if (feat1(a)!=feat2(a))
@@ -58,6 +62,8 @@ object ReliefFFeatureSelector
     val DEFAULT_K=10
     private def getNNearest(distances:Iterable[(Long, Double)], numberOfSelected:Int):List[(Long,Double)]=
     {
+      if (distances.size<=numberOfSelected)
+        return distances.toList
       val nearest=new Array[(Long,Double)](numberOfSelected)
       var curNeighbors=0
       var maxDist=Double.MinValue
@@ -105,7 +111,7 @@ object ReliefFFeatureSelector
     def getGroupedKNNGraph(sc: SparkContext, data:RDD[(LabeledPoint,Long)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], grouper:GroupingProvider):(RDD[(Long,List[(Int,List[(Long,Double)])])],LookupProvider)=
     {
       var rddIndices=data.map(_._2)
-      var indexPairs=rddIndices.cartesian(rddIndices)
+      var indexPairs=rddIndices.cartesian(rddIndices).partitionBy(new HashPartitioner(1024))
       val lookup=new BroadcastLookupProvider(data.map(_.swap))
       val measurer=new ReliefFDistanceProvider(bnTypes, normalizingDict)
       val kNNGraph=indexPairs //Will compare each instance with every other
