@@ -167,11 +167,13 @@ object ReliefFFeatureSelector
     {
       //val (graph,lookup)=BruteForceKNNGraphBuilder.parallelComputeGraph(data, numNeighbors, new ReliefFDistanceProvider(bnTypes, normalizingDict))
       val builder=new LSHLookupKNNGraphBuilder(data)
+      val distanceProvider=new ReliefFDistanceProvider(bnTypes, normalizingDict)
       val graph=if (lshConf.keyLength.isDefined && lshConf.numTables.isDefined)
-                  builder.computeGroupedGraph(data, numNeighbors, lshConf.keyLength.get, lshConf.numTables.get, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict), grouper)
+                  builder.computeGroupedGraph(data, numNeighbors, lshConf.keyLength.get, lshConf.numTables.get, lshConf.radius0, lshConf.maxComparisons, distanceProvider, grouper)
                 else
-                  builder.computeGroupedGraph(data, numNeighbors, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict), grouper)
-      return (graph,builder.lookup)
+                  builder.computeGroupedGraph(data, numNeighbors, lshConf.radius0, lshConf.maxComparisons, distanceProvider, grouper)
+      val refinedGraph=builder.refineGroupedGraph(data, graph.map({case (id,groupedNeighs) => (id,(0,groupedNeighs))}), numNeighbors, distanceProvider, grouper)
+      return (refinedGraph.map({case (id,(count,groupedNeighs)) => (id,groupedNeighs)}),builder.lookup)
     }
     
     def rankFeatures(sc: SparkContext, data: RDD[LabeledPoint], numNeighbors: Int, attributeNumeric: Array[Boolean], discreteClass: Boolean, lshConf:Option[KNiNeConfiguration]): RDD[(Int, Double)] =
@@ -390,7 +392,7 @@ object ReliefFFeatureSelector
 //      conf.set("spark.eventLog.dir","file:///home/eirasf/Escritorio/Tmp-work/sparklog-local")
       
       val sc=new SparkContext(conf)
-      //sc.setLogLevel("WARN")//DEBUG!!!!!!!!!!!!!!!!!!!!!!!
+      sc.setLogLevel("WARN")//DEBUG!!!!!!!!!!!!!!!!!!!!!!!
       println(s"Application Name:${sc.appName}\nDefault parallelism: ${sc.defaultParallelism}")
       
       val numPartitions:Option[Int]=if (options.contains("num_partitions"))
