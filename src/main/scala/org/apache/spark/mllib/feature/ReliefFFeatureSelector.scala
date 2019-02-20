@@ -172,8 +172,12 @@ object ReliefFFeatureSelector
                   builder.computeGroupedGraph(data, numNeighbors, lshConf.keyLength.get, lshConf.numTables.get, lshConf.radius0, lshConf.maxComparisons, distanceProvider, grouper)
                 else
                   builder.computeGroupedGraph(data, numNeighbors, lshConf.radius0, lshConf.maxComparisons, distanceProvider, grouper)
-      val refinedGraph=builder.refineGroupedGraph(data, graph.map({case (id,groupedNeighs) => (id,(0,groupedNeighs))}), numNeighbors, distanceProvider, grouper)
-      return (refinedGraph.map({case (id,(count,groupedNeighs)) => (id,groupedNeighs)}),builder.lookup)
+      val refinedGraph=if (lshConf.refine)
+                          builder.refineGroupedGraph(data, graph.map({case (id,groupedNeighs) => (id,(0,groupedNeighs))}), numNeighbors, distanceProvider, grouper)
+                                 .map({case (id, (viewed, groupedNeighs)) => (id,groupedNeighs)})
+                      else
+                        graph
+      return (refinedGraph,builder.lookup)
     }
     
     def rankFeatures(sc: SparkContext, data: RDD[LabeledPoint], numNeighbors: Int, attributeNumeric: Array[Boolean], discreteClass: Boolean, lshConf:Option[KNiNeConfiguration]): RDD[(Int, Double)] =
@@ -478,6 +482,7 @@ object ReliefFFeatureSelector
         -r    Starting radius (default: """+LSHKNNGraphBuilder.DEFAULT_RADIUS_START+""")
         -c    Maximum comparisons per item (default: auto)
         -p    Number of partitions for the data RDDs (default: 3*sc.defaultParallelism)
+        -s    Skip graph refinement (only LSH) (default: false)
     
     Advanced LSH options:
         -n    Number of hashes per item (default: auto)
@@ -488,7 +493,8 @@ object ReliefFFeatureSelector
     def parseParams(p:Array[String]):Map[String, Any]=
     {
       val m=scala.collection.mutable.Map[String, Any]("num_neighbors" -> ReliefFFeatureSelector.DEFAULT_K.toDouble,
-                                                      "method" -> ReliefFFeatureSelector.DEFAULT_METHOD)
+                                                      "method" -> ReliefFFeatureSelector.DEFAULT_METHOD,
+                                                      "refine" -> true)
       if (p.length<=0)
         showUsageAndExit()
       
@@ -498,7 +504,7 @@ object ReliefFFeatureSelector
       var i=1
       while (i < p.length)
       {
-        if ((i>=p.length-1) || (p(i).charAt(0)!='-'))
+        if ((i>=p.length) || (p(i).charAt(0)!='-'))
         {
           println("Unknown option: "+p(i))
           showUsageAndExit()
@@ -516,6 +522,7 @@ object ReliefFFeatureSelector
             case "c"   => "max_comparisons"
             case "o"   => "output"
             case "p"   => "num_partitions"
+            case "s"   => "refine"
             case somethingElse => readOptionName
           }
         if (!m.keySet.exists(_==option) && option==readOptionName)
@@ -535,13 +542,21 @@ object ReliefFFeatureSelector
         }
         else
         {
-          if ((option=="class_type") || (option=="attribute_types") || (option=="output"))
-            m(option)=p(i+1)
+          if (option=="refine")
+            m("refine")=false
           else
-            m(option)=p(i+1).toDouble
+          {
+            if ((option=="class_type") || (option=="attribute_types") || (option=="output"))
+              m(option)=p(i+1)
+            else
+              m(option)=p(i+1).toDouble
+          }
         }
         
-        i=i+2
+        if (option!="refine")
+          i=i+2
+        else
+          i=i+1
       }
       return m.toMap
     }
