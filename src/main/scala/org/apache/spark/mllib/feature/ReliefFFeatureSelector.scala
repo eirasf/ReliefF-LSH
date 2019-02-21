@@ -247,6 +247,10 @@ object ReliefFFeatureSelector
                               getGroupedKNNGraphFromKNiNe(sc, data.map(_.swap), numNeighbors, bnTypes, normalizingDict, new ReliefFGroupingProvider(countsClass.keys), lshConf.get) 
                             else
                               getGroupedKNNGraph(sc, data, numNeighbors, bnTypes, normalizingDict, new ReliefFGroupingProvider(countsClass.keys))
+      
+      var countEdges=kNNGraph.map({case (index, groupedNeighbors) => groupedNeighbors.map(_._2.size).sum}).sum
+      println("Obtained "+countEdges+" edges for "+kNNGraph.count()+" nodes")
+      
       val dCD=kNNGraph
               .flatMap(//Ungroup everything in order to get closer to having addends
                 {
