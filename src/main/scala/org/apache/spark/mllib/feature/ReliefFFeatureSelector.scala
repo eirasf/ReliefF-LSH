@@ -20,6 +20,7 @@ import es.udc.graph.EuclideanLSHasher
 import es.udc.graph.BroadcastLookupProvider
 import es.udc.graph.LookupProvider
 import org.apache.spark.HashPartitioner
+import breeze.linalg.{DenseVector => BDV}
 
 class ReliefFDistanceProvider(bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]]) extends DistanceProvider
 {
@@ -53,6 +54,10 @@ class ReliefFGroupingProvider(classNames:Iterable[Double]) extends GroupingProvi
   def getGroupId(p1:LabeledPoint):Int=
   {
     return classMap.get(p1.label).get
+  }
+  def getGroupIdList():Iterable[Int]=
+  {
+    return classMap.values
   }
 }
 
@@ -172,11 +177,20 @@ object ReliefFFeatureSelector
                   builder.computeGroupedGraph(data, numNeighbors, lshConf.keyLength.get, lshConf.numTables.get, lshConf.radius0, lshConf.maxComparisons, distanceProvider, grouper)
                 else
                   builder.computeGroupedGraph(data, numNeighbors, lshConf.radius0, lshConf.maxComparisons, distanceProvider, grouper)
+      //DEBUG
+      var countEdges=graph.map({case (index, groupedNeighbors) => groupedNeighbors.map(_._2.size).sum}).sum
+      println("Obtained "+countEdges+" edges for "+graph.count()+" nodes")
+      //graph.map({case (id,groupedNeighs) => (groupedNeighs.filter({case (grId,neighs) => neighs.size<numNeighbors}).size,1)}).reduceByKey(_+_).foreach({case (numGroups,count) => println(s"$count elements with $numGroups incomplete groups")})
+      
       val refinedGraph=if (lshConf.refine)
-                          builder.refineGroupedGraph(data, graph.map({case (id,groupedNeighs) => (id,(0,groupedNeighs))}), numNeighbors, distanceProvider, grouper)
+                          builder.refineGroupedGraph(data, graph.map({case (id,groupedNeighs) => (id,(BDV.zeros[Int](grouper.numGroups),groupedNeighs))}), numNeighbors, distanceProvider, grouper)
                                  .map({case (id, (viewed, groupedNeighs)) => (id,groupedNeighs)})
                       else
                         graph
+      //DEBUG
+      var countEdges2=refinedGraph.map({case (index, groupedNeighbors) => groupedNeighbors.map(_._2.size).sum}).sum
+      println("Obtained "+countEdges2+" edges for "+refinedGraph.count()+" nodes")
+      //refinedGraph.map({case (id,groupedNeighs) => (groupedNeighs.filter({case (grId,neighs) => neighs.size<numNeighbors}).size,1)}).reduceByKey(_+_).foreach({case (numGroups,count) => println(s"$count elements with $numGroups incomplete groups")})
       return (refinedGraph,builder.lookup)
     }
     
@@ -247,9 +261,6 @@ object ReliefFFeatureSelector
                               getGroupedKNNGraphFromKNiNe(sc, data.map(_.swap), numNeighbors, bnTypes, normalizingDict, new ReliefFGroupingProvider(countsClass.keys), lshConf.get) 
                             else
                               getGroupedKNNGraph(sc, data, numNeighbors, bnTypes, normalizingDict, new ReliefFGroupingProvider(countsClass.keys))
-      
-      var countEdges=kNNGraph.map({case (index, groupedNeighbors) => groupedNeighbors.map(_._2.size).sum}).sum
-      println("Obtained "+countEdges+" edges for "+kNNGraph.count()+" nodes")
       
       val dCD=kNNGraph
               .flatMap(//Ungroup everything in order to get closer to having addends
