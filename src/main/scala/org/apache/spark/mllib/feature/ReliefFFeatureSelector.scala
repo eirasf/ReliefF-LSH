@@ -161,9 +161,13 @@ object ReliefFFeatureSelector
     
     def getKNNGraphFromKNiNe(sc: SparkContext, data:RDD[(Long,LabeledPoint)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], lshConf:KNiNeConfiguration):(RDD[(Long,List[(Long,Double)])],LookupProvider)=
     {
-      //val (graph,lookup)=BruteForceKNNGraphBuilder.parallelComputeGraph(data, numNeighbors, new ReliefFDistanceProvider(bnTypes, normalizingDict))
       val builder=new LSHLookupKNNGraphBuilder(data)
-      val graph=builder.computeGraph(data, numNeighbors, lshConf.keyLength.get, lshConf.numTables.get, lshConf.radius0, lshConf.maxComparisons, new ReliefFDistanceProvider(bnTypes, normalizingDict))
+      val distanceProvider=new ReliefFDistanceProvider(bnTypes, normalizingDict)
+      val graph=if (lshConf.keyLength.isDefined && lshConf.numTables.isDefined)
+                  builder.computeGraph(data, numNeighbors, lshConf.keyLength.get, lshConf.numTables.get, lshConf.radius0, lshConf.maxComparisons, distanceProvider)
+                else
+                  builder.computeGraph(data, numNeighbors, lshConf.radius0, lshConf.maxComparisons, distanceProvider)
+                  
       return (graph,
               builder.lookup)
     }
