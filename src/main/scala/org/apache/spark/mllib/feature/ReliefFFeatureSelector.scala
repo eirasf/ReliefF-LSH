@@ -376,7 +376,10 @@ object ReliefFFeatureSelector
                                     if (bnTypes.value(a))
                                     {
                                        val range=normalizingDict.value(a)
-                                       res(a)=(a,(math.abs(feat1(a)-feat2(a))/range, math.abs(feat1(a)-feat2(a))*math.abs(lookup.lookup(x).label-lookup.lookup(y).label)/range)) //TODO - Class normalization
+                                       if (math.abs(range)>0)
+                                         res(a)=(a,(math.abs(feat1(a)-feat2(a))/range, math.abs(feat1(a)-feat2(a))*math.abs(lookup.lookup(x).label-lookup.lookup(y).label)/range)) //TODO - Class normalization
+                                       else
+                                         res(a)=(a,(math.abs(feat1(a)-feat2(a)), math.abs(feat1(a)-feat2(a))*math.abs(lookup.lookup(x).label-lookup.lookup(y).label))) //TODO - Class normalization
                                     }
                                     else
                                       if (feat1(a)!=feat2(a))
@@ -393,7 +396,11 @@ object ReliefFFeatureSelector
                 })*/
             .map(//Add 1 to the attribNum so that is in the [1,N] range and compute weights.
                 {
-                  case(attribNum, (m_nda, m_ndcda)) => (attribNum+1, (m_ndcda/m_ndc - ((rangeClass*m_nda - m_ndcda)/(numNeighborsObtained*rangeClass*numElems-m_ndc))))
+                  case(attribNum, (m_nda, m_ndcda)) =>
+                    if (math.abs(m_ndc)>0)
+                      (attribNum+1, (m_ndcda/m_ndc - ((rangeClass*m_nda - m_ndcda)/(numNeighborsObtained*rangeClass*numElems-m_ndc))))
+                    else
+                      (attribNum+1, (m_ndcda - ((rangeClass*m_nda - m_ndcda)/(numNeighborsObtained*rangeClass*numElems-m_ndc))))
                 })
       dCD.unpersist(false)
       
