@@ -21,6 +21,10 @@ import es.udc.graph.BroadcastLookupProvider
 import es.udc.graph.LookupProvider
 import org.apache.spark.HashPartitioner
 import breeze.linalg.{DenseVector => BDV}
+import es.udc.graph.GraphBuilder
+import es.udc.graph.NeighborsForElement
+import es.udc.graph.GroupedNeighborsForElement
+import es.udc.graph.IndexDistancePair
 
 class ReliefFDistanceProvider(bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]]) extends DistanceProvider
 {
@@ -107,13 +111,13 @@ object ReliefFFeatureSelector
       //return nearestRet.toList
     }
     
-    def getKNNGraph(sc: SparkContext, data:RDD[(LabeledPoint,Long)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]]):(RDD[(Long,List[(Long,Double)])],LookupProvider)=
+    def getKNNGraph(sc: SparkContext, data:RDD[(LabeledPoint,Long)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]]):(RDD[(Long,NeighborsForElement)],LookupProvider)=
     {
       val (graph,lookup)=getGroupedKNNGraph(sc, data, numNeighbors, bnTypes, normalizingDict, new DummyGroupingProvider())
-      return (graph.map({case (x,groupedNeighbors) => (x,groupedNeighbors.head._2)}),lookup)
+      return (graph.map({case (x,groupedNeighbors) => (x,groupedNeighbors.groupedNeighborLists.head._2)}),lookup)
     }
     
-    def getGroupedKNNGraph(sc: SparkContext, data:RDD[(LabeledPoint,Long)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], grouper:GroupingProvider):(RDD[(Long,List[(Int,List[(Long,Double)])])],LookupProvider)=
+    def getGroupedKNNGraph(sc: SparkContext, data:RDD[(LabeledPoint,Long)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], grouper:GroupingProvider):(RDD[(Long,GroupedNeighborsForElement)],LookupProvider)=
     {
       var rddIndices=data.map(_._2)
       var indexPairs=rddIndices.cartesian(rddIndices).partitionBy(new HashPartitioner(1024))
@@ -129,37 +133,25 @@ object ReliefFFeatureSelector
                                                            {case (sum,((a,i),b)) if (bnTypes.value(i)) => sum+math.abs(a-b) //Numeric
                                                            case (sum,((a,i),b)) => if (a!=b) sum+1.0 else sum}
                                                            )*/
-              case (x,y) => val dist=measurer.getDistance(lookup.lookup(x), lookup.lookup(y))
-                            List((x, (y, dist)),(y, (x, dist)))
+              case (x,y) => val px=lookup.lookup(x)
+                            val py=lookup.lookup(y)
+                            val dist=measurer.getDistance(px, py)
+                            List((x, (grouper.getGroupId(py),IndexDistancePair(y,dist))),(y, (grouper.getGroupId(px),IndexDistancePair(x,dist))))
             })//.filter(_!=null)//By using flatMap and None/Some values this filter is avoided
             .groupByKey//Group by instance
             .map(//Group by class for each instance so that we can take K neighbors for each class for each instance
                 {
-                  case (x, neighbors) => (x, neighbors.groupBy(
-                                              {
-                                                case (y, distances) =>
-                                                  val yVal=lookup.lookup(y)
-                                                  grouper.getGroupId(yVal)
-                                              }).toList
-                                         )
-                })
-            .map(//Sort by distance and select K neighbors for each group
-                {
-                  case(x, neighborsByClass) =>
-                              (x,neighborsByClass.map(
-                                  {
-                                    /*case (y, distances) => (y,distances.toSeq.sortBy({case(y,d) => d}) //Sort by distance
-                                                                                        .take(numNeighbors)) //Take the K nearest neighbors
-                                    */
-                                    case (cl, distances) => (cl, getNNearest(distances, numNeighbors))
-                                   })
-                                   //.map({case(y,distances) => (y,distances.map({case(y,d) => (y,distances.length)}))}) //Add the number of neighbors so that we can divide later
-                              )
+                  case (x, neighbors) => val pairsByClass=neighbors.groupBy(_._1)
+                                         val neighsByClass=pairsByClass.mapValues({case tupleIterable => val neighs=new NeighborsForElement(numNeighbors)
+                                                                                     neighs.addElements(tupleIterable.map(_._2).toList)
+                                                                                     neighs})
+                                         val mutableNeighs=collection.mutable.Map(neighsByClass.toSeq: _*) 
+                                          (x,new GroupedNeighborsForElement(mutableNeighs,grouper,numNeighbors))
                 })
       return (kNNGraph, lookup)
     }
     
-    def getKNNGraphFromKNiNe(sc: SparkContext, data:RDD[(Long,LabeledPoint)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], lshConf:KNiNeConfiguration):(RDD[(Long,List[(Long,Double)])],LookupProvider)=
+    def getKNNGraphFromKNiNe(sc: SparkContext, data:RDD[(Long,LabeledPoint)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], lshConf:KNiNeConfiguration):(RDD[(Long,NeighborsForElement)],LookupProvider)=
     {
       val builder=new LSHLookupKNNGraphBuilder(data)
       val distanceProvider=new ReliefFDistanceProvider(bnTypes, normalizingDict)
@@ -172,7 +164,7 @@ object ReliefFFeatureSelector
               builder.lookup)
     }
     
-    def getGroupedKNNGraphFromKNiNe(sc: SparkContext, data:RDD[(Long,LabeledPoint)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], grouper:GroupingProvider, lshConf:KNiNeConfiguration):(RDD[(Long,List[(Int,List[(Long,Double)])])],LookupProvider)=
+    def getGroupedKNNGraphFromKNiNe(sc: SparkContext, data:RDD[(Long,LabeledPoint)], numNeighbors:Int, bnTypes: Broadcast[Array[Boolean]], normalizingDict: Broadcast[scala.collection.Map[Int, Double]], grouper:GroupingProvider, lshConf:KNiNeConfiguration):(RDD[(Long,GroupedNeighborsForElement)],LookupProvider)=
     {
       //val (graph,lookup)=BruteForceKNNGraphBuilder.parallelComputeGraph(data, numNeighbors, new ReliefFDistanceProvider(bnTypes, normalizingDict))
       val builder=new LSHLookupKNNGraphBuilder(data)
@@ -182,17 +174,19 @@ object ReliefFFeatureSelector
                 else
                   builder.computeGroupedGraph(data, numNeighbors, lshConf.radius0, lshConf.maxComparisons, distanceProvider, grouper)
       //DEBUG
-      var countEdges=graph.map({case (index, groupedNeighbors) => groupedNeighbors.map(_._2.size).sum}).sum
+      var countEdges=graph.map({case (index, groupedNeighbors) => groupedNeighbors.groupedNeighborLists.map(_._2.listNeighbors.size).sum}).sum
       println("Obtained "+countEdges+" edges for "+graph.count()+" nodes")
       //graph.map({case (id,groupedNeighs) => (groupedNeighs.filter({case (grId,neighs) => neighs.size<numNeighbors}).size,1)}).reduceByKey(_+_).foreach({case (numGroups,count) => println(s"$count elements with $numGroups incomplete groups")})
       
-      val refinedGraph=if (lshConf.refine)
-                          builder.refineGroupedGraph(data, graph.map({case (id,groupedNeighs) => (id,(BDV.zeros[Int](grouper.numGroups),groupedNeighs))}), numNeighbors, distanceProvider, grouper)
-                                 .map({case (id, (viewed, groupedNeighs)) => (id,groupedNeighs)})
+      val refinedGraph=if (lshConf.refine>0)
+                       {
+                          val withCounts=builder.refineGroupedGraph(data, graph.map({case (id,groupedNeighs) => (id,groupedNeighs.wrapWithCounts(BDV.zeros[Int](grouper.numGroups)))}), numNeighbors, distanceProvider)
+                          withCounts.map({case (id,neighs) => (id,neighs.asInstanceOf[GroupedNeighborsForElement])})
+                       }
                       else
                         graph
       //DEBUG
-      var countEdges2=refinedGraph.map({case (index, groupedNeighbors) => groupedNeighbors.map(_._2.size).sum}).sum
+      var countEdges2=refinedGraph.map({case (index, groupedNeighbors) => groupedNeighbors.groupedNeighborLists.map(_._2.listNeighbors.size).sum}).sum
       println("Obtained "+countEdges2+" edges for "+refinedGraph.count()+" nodes")
       //refinedGraph.map({case (id,groupedNeighs) => (groupedNeighs.filter({case (grId,neighs) => neighs.size<numNeighbors}).size,1)}).reduceByKey(_+_).foreach({case (numGroups,count) => println(s"$count elements with $numGroups incomplete groups")})
       return (refinedGraph,builder.lookup)
@@ -269,8 +263,15 @@ object ReliefFFeatureSelector
       val dCD=kNNGraph
               .flatMap(//Ungroup everything in order to get closer to having addends
                 {
-                  case (x, nearestNeighborsByClass) =>
-                    nearestNeighborsByClass.flatMap({y=>List(y._2.map({case (p,d) => (p,y._2.length)}))}).flatten.map({case (otherElement,k) => (x,(otherElement,k))})
+                  case (x, groupedNeighbors) =>
+                    groupedNeighbors
+                      .groupedNeighborLists
+                      .flatMap({case y=>
+                                  val ly=y._2.listNeighbors
+                                  List(ly.map({case p => (p.index,ly.length)}))
+                                })
+                      .flatten
+                      .map({case (otherElement,k) => (x,(otherElement,k))})
                 })
             .map(//Compute multipliers for each addend depending on their class
                 {
@@ -339,7 +340,8 @@ object ReliefFFeatureSelector
             .map(
                 {
                   case (index,neighbors) =>
-                    (index,neighbors.sortBy(_._2).map({case (idx,distance) => (idx,neighbors.length.toDouble)}))
+                    val nList=neighbors.listNeighbors
+                    (index,nList.sortBy(_.distance).map({case pair => (pair.index,nList.length.toDouble)}))
                 }
                 )
             /*.map(
@@ -409,6 +411,10 @@ object ReliefFFeatureSelector
     
     def main(args: Array[String])
     {
+      GraphBuilder.readFromFiles("");
+      System.exit(0)
+      
+      
       val options=parseParams(args)
       
       var file=options("dataset").asInstanceOf[String]
@@ -520,7 +526,7 @@ object ReliefFFeatureSelector
     {
       val m=scala.collection.mutable.Map[String, Any]("num_neighbors" -> ReliefFFeatureSelector.DEFAULT_K.toDouble,
                                                       "method" -> ReliefFFeatureSelector.DEFAULT_METHOD,
-                                                      "refine" -> true)
+                                                      "refine" -> 1)
       if (p.length<=0)
         showUsageAndExit()
       
@@ -568,21 +574,13 @@ object ReliefFFeatureSelector
         }
         else
         {
-          if (option=="refine")
-            m("refine")=false
+          if ((option=="class_type") || (option=="attribute_types") || (option=="output"))
+            m(option)=p(i+1)
           else
-          {
-            if ((option=="class_type") || (option=="attribute_types") || (option=="output"))
-              m(option)=p(i+1)
-            else
-              m(option)=p(i+1).toDouble
-          }
+            m(option)=p(i+1).toDouble
         }
         
-        if (option!="refine")
-          i=i+2
-        else
-          i=i+1
+        i=i+2
       }
       return m.toMap
     }
