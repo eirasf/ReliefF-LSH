@@ -146,7 +146,7 @@ object ReliefFFeatureSelector
                                                                                      neighs.addElements(tupleIterable.map(_._2).toList)
                                                                                      neighs})
                                          val mutableNeighs=collection.mutable.Map(neighsByClass.toSeq: _*) 
-                                          (x,new GroupedNeighborsForElement(mutableNeighs,grouper,numNeighbors))
+                                          (x,new GroupedNeighborsForElement(mutableNeighs,grouper.getGroupIdList(),numNeighbors))
                 })
       return (kNNGraph, lookup)
     }
@@ -180,7 +180,7 @@ object ReliefFFeatureSelector
       
       val refinedGraph=if (lshConf.refine>0)
                        {
-                          val withCounts=builder.refineGroupedGraph(data, graph.map({case (id,groupedNeighs) => (id,groupedNeighs.wrapWithCounts(BDV.zeros[Int](grouper.numGroups)))}), numNeighbors, distanceProvider)
+                          val withCounts=builder.refineGroupedGraph(data, graph.map({case (id,groupedNeighs) => (id,groupedNeighs.wrapWithCounts(BDV.zeros[Int](grouper.numGroups)))}), numNeighbors, distanceProvider, grouper)
                           withCounts.map({case (id,neighs) => (id,neighs.asInstanceOf[GroupedNeighborsForElement])})
                        }
                       else
@@ -192,7 +192,7 @@ object ReliefFFeatureSelector
       return (refinedGraph,builder.lookup)
     }
     
-    def rankFeatures(sc: SparkContext, data: RDD[LabeledPoint], numNeighbors: Int, attributeNumeric: Array[Boolean], discreteClass: Boolean, lshConf:Option[KNiNeConfiguration]): RDD[(Int, Double)] =
+    def rankFeatures(sc: SparkContext, data: RDD[LabeledPoint], numNeighbors: Int, attributeNumeric: Array[Boolean], discreteClass: Boolean, lshConf:Option[KNiNeConfiguration], graphFile:Option[String]): RDD[(Int, Double)] =
     {
       data.cache()
       //Count total number of instances
@@ -236,7 +236,7 @@ object ReliefFFeatureSelector
       if (discreteClass)
       {
         data.unpersist(false)
-        return selectDiscrete(sc, numberedData, bnTypes, numNeighbors, bnNormalizingDict, countsClass.toMap, numElems, lshConf);
+        return selectDiscrete(sc, numberedData, bnTypes, numNeighbors, bnNormalizingDict, countsClass.toMap, numElems, lshConf, graphFile);
       }
       
       val maxMinClass=data.map(
@@ -250,15 +250,18 @@ object ReliefFFeatureSelector
       val rangeClass=maxMinClass._1-maxMinClass._2
       //printf("\n\nRange Class:"+rangeClass+"\n")
       data.unpersist(false)
-      return selectNumeric(sc, numberedData, bnTypes, numNeighbors, bnNormalizingDict, countsClass.toMap, numElems, rangeClass, lshConf)
+      return selectNumeric(sc, numberedData, bnTypes, numNeighbors, bnNormalizingDict, countsClass.toMap, numElems, rangeClass, lshConf, graphFile)
     }
     
-    def selectDiscrete(sc: SparkContext, data: RDD[(LabeledPoint,Long)], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, normalizingDict: Broadcast[scala.collection.Map[Int, Double]], countsClass: Map[Double, Double], numElems: Double, lshConf:Option[KNiNeConfiguration]): RDD[(Int, Double)] =
+    def selectDiscrete(sc: SparkContext, data: RDD[(LabeledPoint,Long)], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, normalizingDict: Broadcast[scala.collection.Map[Int, Double]], countsClass: Map[Double, Double], numElems: Double, lshConf:Option[KNiNeConfiguration], graphFile:Option[String]): RDD[(Int, Double)] =
     {
       val (kNNGraph,lookup)=if (lshConf.isDefined)
                               getGroupedKNNGraphFromKNiNe(sc, data.map(_.swap), numNeighbors, bnTypes, normalizingDict, new ReliefFGroupingProvider(countsClass.keys), lshConf.get) 
                             else
-                              getGroupedKNNGraph(sc, data, numNeighbors, bnTypes, normalizingDict, new ReliefFGroupingProvider(countsClass.keys))
+                              if (graphFile.isDefined)
+                                (GraphBuilder.readFromFiles(graphFile.get, sc),new BroadcastLookupProvider(data.map(_.swap)))
+                              else
+                                getGroupedKNNGraph(sc, data, numNeighbors, bnTypes, normalizingDict, new ReliefFGroupingProvider(countsClass.keys))
       
       val dCD=kNNGraph
               .flatMap(//Ungroup everything in order to get closer to having addends
@@ -324,12 +327,15 @@ object ReliefFFeatureSelector
       return dCD;
     }
     
-    def selectNumeric(sc: SparkContext, data: RDD[(LabeledPoint, Long)], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, normalizingDict: Broadcast[scala.collection.Map[Int, Double]], countsClass: Map[Double, Double], numElems: Double, rangeClass: Double, lshConf:Option[KNiNeConfiguration]): RDD[(Int, Double)] =
+    def selectNumeric(sc: SparkContext, data: RDD[(LabeledPoint, Long)], bnTypes: Broadcast[Array[Boolean]], numNeighbors: Int, normalizingDict: Broadcast[scala.collection.Map[Int, Double]], countsClass: Map[Double, Double], numElems: Double, rangeClass: Double, lshConf:Option[KNiNeConfiguration], graphFile:Option[String]): RDD[(Int, Double)] =
     {
       val (kNNGraph,lookup)=if (lshConf.isDefined)
                               getKNNGraphFromKNiNe(sc, data.map(_.swap), numNeighbors, bnTypes, normalizingDict, lshConf.get)
                             else
-                              getKNNGraph(sc, data, numNeighbors, bnTypes, normalizingDict)
+                              if (graphFile.isDefined)
+                                (GraphBuilder.readFromFiles(graphFile.get, sc).map({case (id,gNeighs) => (id,gNeighs.groupedNeighborLists.head._2)}),new BroadcastLookupProvider(data.map(_.swap)))
+                              else
+                                getKNNGraph(sc, data, numNeighbors, bnTypes, normalizingDict)
       /*println(kNNGraph.map(
                 {
                   case (index,neighbors) =>
@@ -411,11 +417,13 @@ object ReliefFFeatureSelector
     
     def main(args: Array[String])
     {
-      GraphBuilder.readFromFiles("");
-      System.exit(0)
-      
-      
       val options=parseParams(args)
+      
+      if ((options("method")=="read") && !options.contains("files"))
+      {
+        println("Read method requires the -f parameter")
+        System.exit(-1)
+      }
       
       var file=options("dataset").asInstanceOf[String]
       
@@ -487,7 +495,11 @@ object ReliefFFeatureSelector
         println("LSH configuration: "+kNiNeConf.get.toString())
         pw.println("LSH configuration: "+kNiNeConf.get.toString())
       }
-      val features=rankFeatures(sc, data, numNeighbors, attributeTypes, discreteClass, kNiNeConf)
+      val graphFile=if (options.contains("files"))
+                      Some(options.get("files").asInstanceOf[String])
+                    else
+                      None
+      val features=rankFeatures(sc, data, numNeighbors, attributeTypes, discreteClass, kNiNeConf, graphFile)
       //Print results
       features.sortBy(_._2, false).collect().foreach({case (index, weight) =>
                                                               printf("Attribute %d: %f\n",index,weight)
@@ -510,11 +522,12 @@ object ReliefFFeatureSelector
         -t    Attribute types. String consisting of N or C for each attribute
         -ct    Class type. Either N (numerical) or C (categorical)  
         -k    Number of neighbors (default: """+ReliefFFeatureSelector.DEFAULT_K+""")
-        -m    Method used to compute the graph. Valid values: lsh, brute (default: """+ReliefFFeatureSelector.DEFAULT_METHOD+""")
+        -m    Method used to compute the graph. Valid values: lsh, brute, read (default: """+ReliefFFeatureSelector.DEFAULT_METHOD+""")
         -r    Starting radius (default: """+LSHKNNGraphBuilder.DEFAULT_RADIUS_START+""")
         -c    Maximum comparisons per item (default: auto)
         -p    Number of partitions for the data RDDs (default: 3*sc.defaultParallelism)
         -s    Skip graph refinement (only LSH) (default: false)
+        -f    Path to files containing the read graph (only for method=read)
     
     Advanced LSH options:
         -n    Number of hashes per item (default: auto)
@@ -555,6 +568,7 @@ object ReliefFFeatureSelector
             case "o"   => "output"
             case "p"   => "num_partitions"
             case "s"   => "refine"
+            case "f"   => "files"
             case somethingElse => readOptionName
           }
         if (!m.keySet.exists(_==option) && option==readOptionName)
@@ -564,7 +578,7 @@ object ReliefFFeatureSelector
         }
         if (option=="method")
         {
-          if (p(i+1)=="lsh" || p(i+1)=="brute")
+          if (p(i+1)=="lsh" || p(i+1)=="brute" || p(i+1)=="read")
             m(option)=p(i+1)
           else
           {
@@ -574,7 +588,7 @@ object ReliefFFeatureSelector
         }
         else
         {
-          if ((option=="class_type") || (option=="attribute_types") || (option=="output"))
+          if ((option=="class_type") || (option=="attribute_types") || (option=="output") || (option=="files"))
             m(option)=p(i+1)
           else
             m(option)=p(i+1).toDouble
