@@ -496,7 +496,7 @@ object ReliefFFeatureSelector
         pw.println("LSH configuration: "+kNiNeConf.get.toString())
       }
       val graphFile=if (options.contains("files"))
-                      Some(options.get("files").asInstanceOf[String])
+                      Some(options.get("files").get.asInstanceOf[String])
                     else
                       None
       val features=rankFeatures(sc, data, numNeighbors, attributeTypes, discreteClass, kNiNeConf, graphFile)
