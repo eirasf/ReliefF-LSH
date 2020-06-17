@@ -342,12 +342,13 @@ object ReliefFFeatureSelector
                     (index,neighbors.sortBy(_._2))
                 }
                 ).sortBy(_._1).first())*/
+     println(kNNGraph.first())
       val dCD=kNNGraph
             .map(
                 {
                   case (index,neighbors) =>
                     val nList=neighbors.listNeighbors
-                    (index,nList.sortBy(_.distance).map({case pair => (pair.index,nList.length.toDouble)}))
+                    (index,nList.sortBy(_.distance).map({case pair => (pair.index,nList.size.toDouble)}))
                 }
                 )
             /*.map(
@@ -360,7 +361,8 @@ object ReliefFFeatureSelector
                   case (x, distances) =>
                       distances.flatMap({y => List((x,y))})
                 })
-      dCD.cache()          
+      dCD.cache()
+      println(dCD.first())
       val m_ndc=dCD.map(
                 {
                   case (x, (y,k)) => (math.abs(lookup.lookup(x.toInt).label-lookup.lookup(y.toInt).label))
