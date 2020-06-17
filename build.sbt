@@ -6,7 +6,7 @@ organization := "com.github.sramirez"
 
 scalaVersion := "2.11.11"
 
-unmanagedJars in Compile += file("lib/spark-knine-0.2.jar")
+unmanagedJars in Compile += file("lib/knine-assembly-0.1.jar")
 //unmanagedJars in Compile += file("lib/spark-knn-0.2.0.jar")
 
 resolvers ++= Seq(
