@@ -21,10 +21,6 @@ Distributed approximation of the feature ranking obtained by ReliefF for Big Dat
                 -n    Number of hashes per item (default: auto)
                 -l    Hash length (default: auto)
 
-## Contributors
+## Reference
 
-- Carlos Eiras-Franco (carlos.eiras.franco@udc.es)
-
-##References
-
-
+Eiras‐Franco, C., Guijarro‐Berdiñas, B., Alonso‐Betanzos, A., & Bahamonde, A. (2021). Scalable feature selection using ReliefF aided by locality‐sensitive hashing. International Journal of Intelligent Systems, 36(11), 6161-6179.
